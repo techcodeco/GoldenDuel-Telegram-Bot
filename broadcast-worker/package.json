@@ -1,0 +1,31 @@
+{
+  "name": "rps-broadcast-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "build": "tsc && tsc-alias --resolve-full-paths --resolve-full-extension .js",
+    "start:prod": "cross-env NODE_ENV=production node dist/main.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@grammyjs/auto-retry": "^2.0.0",
+    "@grammyjs/transformer-throttler": "^1.2.1",
+    "dotenv": "^16.4.0",
+    "grammy": "^1.30.0",
+    "ioredis": "^5.4.0",
+    "mongoose": "^8.5.0",
+    "pino": "latest",
+    "pino-roll": "latest",
+    "bullmq": "^5.58.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "cross-env": "^7.0.3",
+    "esbuild": "latest",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "rps-backup-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "start": "node .",
+    "build": "tsc && tsc-alias --resolve-full-paths --resolve-full-extension .js",
+    "start:prod": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "grammy": "^1.30.0",
+    "ioredis": "^5.4.0",
+    "archiver": "^7.0.1",
+    "pino": "latest",
+    "pino-roll": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "latest",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0",
+    "@types/archiver": "^6.0.3"
+  }
+}

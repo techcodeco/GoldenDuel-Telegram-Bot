@@ -1,0 +1,17 @@
+import mongoose, { Schema, model } from 'mongoose'
+
+const userSchema = new Schema({ tgId: Number, firstName: String, username: String, lang: String, role: String, balances: { IRT: { available: Number, locked: Number }, TON: { available: Number, locked: Number } }, duelsPlayed: Number }, { strict: false, versionKey: false })
+export const User = mongoose.models.User ?? model('User', userSchema)
+const groupTargetSchema = new Schema({ chatId: { type: String, unique: true }, title: String, username: String, type: String, status: String, lastSeenAt: Date, addedAt: Date }, { timestamps: true, strict: false, versionKey: false })
+export const GroupTarget = mongoose.models.GroupTarget ?? model('GroupTarget', groupTargetSchema)
+const groupConfigSchema = new Schema({ chatId: { type: String, unique: true, index: true }, title: String, activatorId: { type: Number, required: true }, language: { type: String, enum: ['fa','en'], default: 'fa' }, allowedModes: { type: [String], default: ['bet','friendly'] }, allowedCurrencies: { type: [String], default: ['IRT','TON'] }, inviteTimeoutSeconds: { type: Number, default: 120 }, betInviteTimeoutSeconds: { type: Number, default: 120 }, friendlyInviteTimeoutSeconds: { type: Number, default: 120 }, betTimeoutSeconds: { type: Number, default: 180 }, friendlyTimeoutSeconds: { type: Number, default: 120 }, enabled: { type: Boolean, default: true } }, { timestamps: true, versionKey: false })
+export const GroupConfig = mongoose.models.GroupConfig ?? model('GroupConfig', groupConfigSchema)
+const groupDuelSchema = new Schema({ _id: String, chatId: { type: String, index: true }, activatorId: Number, initiatorId: Number, opponentId: Number, currency: String, amount: Number, mode: String, status: { type: String, index: true }, inviteDeadline: Number, deadline: Number, reminderAt: Number, reminderSent: { type: Boolean, default: false }, p1Choice: String, p2Choice: String, outcome: String, winnerId: Number, fee: Number, reward: Number, rewardPaid: { type: Boolean, default: false }, timeoutSettled: { type: Boolean, default: false }, timeoutResultSentAt: Date, rewardPercent: Number, settledAt: Date, inviteMessageId: Number, gameMessageId: Number, triggerMessageId: Number, timingScheduledAt: Date }, { timestamps: true, versionKey: false })
+groupDuelSchema.index({ status: 1, inviteDeadline: 1 }); groupDuelSchema.index({ status: 1, deadline: 1 });
+export const GroupDuel = mongoose.models.GroupDuel ?? model('GroupDuel', groupDuelSchema)
+const settingsSchema = new Schema({ _id: String }, { strict: false, versionKey: false })
+export const Settings = mongoose.models.Settings ?? model('Settings', settingsSchema)
+const ledgerSchema = new Schema({ key: { type: String, unique: true }, userId: Number, currency: String, type: String, available: Number, locked: Number, ref: String }, { timestamps: { createdAt: 'at', updatedAt: false }, versionKey: false })
+export const Ledger = mongoose.models.Ledger ?? model('Ledger', ledgerSchema)
+const houseSchema = new Schema({ _id: String, balances: { IRT: Number, TON: Number } }, { versionKey: false })
+export const House = mongoose.models.House ?? model('House', houseSchema)

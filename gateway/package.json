@@ -1,0 +1,26 @@
+{
+  "name": "rps-gateway",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/server.js",
+  "scripts": {
+    "dev": "bun --watch src/server.ts",
+    "start": "bun .",
+    "build": "tsc && tsc-alias --resolve-full-paths --resolve-full-extension .js",
+    "webhook": "bun scripts/setWebhook.ts",
+    "poll": "bun scripts/poll.ts"
+  },
+  "dependencies": {
+    "elysia": "^1.0.0",
+    "ioredis": "^5.0.0",
+    "pino": "latest",
+    "pino-roll": "latest",
+    "tsc-alias": "^1.9.9"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.0.0",
+    "@types/node": "^22.0.0"
+  }
+}

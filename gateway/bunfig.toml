@@ -1,0 +1,4 @@
+# Bun configuration
+[install]
+# keep caret ranges from package.json
+exact = false
