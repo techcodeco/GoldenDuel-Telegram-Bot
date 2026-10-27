@@ -37,7 +37,7 @@
 - وابستگی `bullmq` از `group-worker/package.json` حذف شده است.
 - Group Worker درخواست‌های `group-invite-timeout`، `group-match-timeout` و `group-match-reminder` (هشدار ۸۵٪ مهلت انتخاب) را با فیلدهای `type` و `data` در Redis Stream زیر ارسال می‌کند:
 
-  `TIMING_COMMAND_STREAM` (پیش‌فرض `rps:timing:commands`)
+  `TIMING_COMMAND_STREAM` (پیش‌فرض `gd:timing:commands`)
 
 - `bullMQ-worker/src/core/timing-command-consumer.ts` این فرمان‌ها را مصرف و به صف مشترک `duel-timing` تبدیل می‌کند؛ اجرا و بازیابی jobها در همین سرویس انجام می‌شود.
 - `private-worker` هم از همان Stream و سازوکار استفاده می‌کند؛ نیازی به اتصال مستقیم Group Worker به BullMQ نیست.
@@ -112,7 +112,6 @@ group-worker/src/
 
 **اعتبارسنجی این اصلاح:** ۲۰ فایل TypeScript با transpile نحوی بررسی شدند و خطای syntax نداشتند؛ ZIP با `unzip -t` بررسی شده است. به دلیل timeout شدن نصب npm در محیط ساخت، `npm run typecheck` و تست یکپارچه اجرا نشدند.
 
-
 ## اصلاحیهٔ تکمیلی: تجربهٔ فرم، هشدار ۸۵٪ و پنل زمان
 
 ### موارد اعمال‌شده
@@ -144,7 +143,6 @@ group-worker/src/
 - transpile نحوی برای ۵۱ فایل TypeScript از Group Worker و BullMQ Worker اجرا شد: بدون خطای syntax.
 - `grep` سورس این دو worker برای پیام اضافهٔ پایان بازی اجرا شد: متن انگلیسی/فارسی اضافه باقی نمانده است.
 - تلاش برای نصب وابستگی‌های npm در محیط ساخت به پایان مهلت رسید؛ به همین دلیل typecheck/build با dependencyهای واقعی و تست end-to-end اجرا نشده‌اند. قبل از استقرار، در هر دو پوشه `group-worker` و `bullMQ-worker` فرمان‌های `npm install`, `npm run typecheck` و `npm run build` را اجرا کنید.
-
 
 ## تغییرات تکمیلی ۲۰ اکتبر ۲۰۲۶: بکاپ، تایمر دلخواه و منوی رنگی
 

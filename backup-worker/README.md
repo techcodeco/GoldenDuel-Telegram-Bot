@@ -29,7 +29,7 @@ The first backup starts when the worker comes up; subsequent runs use the interv
 The ZIP has this structure:
 
 ```text
-rps-mongodb-<timestamp>.zip
+gd-mongodb-<timestamp>.zip
 ├── manifest.json
 └── dump/
     └── <database>/
@@ -60,15 +60,16 @@ Pino logs go to `LOG_DIR`; daily/size-based rotation, retention and throttling a
 2. For split parts on Linux/macOS:
 
    ```bash
-   cat rps-mongodb-<timestamp>.zip.part001-of-003 \
-       rps-mongodb-<timestamp>.zip.part002-of-003 \
-       rps-mongodb-<timestamp>.zip.part003-of-003 \
-       > rps-mongodb-<timestamp>.zip
-   unzip -t rps-mongodb-<timestamp>.zip
-   unzip rps-mongodb-<timestamp>.zip -d restore-point
+   cat gd-mongodb-<timestamp>.zip.part001-of-003 \
+       gd-mongodb-<timestamp>.zip.part002-of-003 \
+       gd-mongodb-<timestamp>.zip.part003-of-003 \
+       > gd-mongodb-<timestamp>.zip
+   unzip -t gd-mongodb-<timestamp>.zip
+   unzip gd-mongodb-<timestamp>.zip -d restore-point
    ```
 
-   Change `003` and the listed filenames to match the actual part count. On Windows `cmd.exe`, use binary concatenation: `copy /b part001+part002+part003 rps-mongodb-<timestamp>.zip`.
+   Change `003` and the listed filenames to match the actual part count. On Windows `cmd.exe`, use binary concatenation: `copy /b part001+part002+part003 gd-mongodb-<timestamp>.zip`.
+
 3. Inspect `restore-point/manifest.json` and confirm the target URI before restoring. Stop application workers first. Restore the BSON directory (not the outer ZIP) with:
 
    ```bash

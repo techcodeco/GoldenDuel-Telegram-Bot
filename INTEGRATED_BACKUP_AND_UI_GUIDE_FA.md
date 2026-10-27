@@ -40,12 +40,12 @@ npm start
 ZIP حاوی `manifest.json` و پوشه‌ی `dump/<database>/<collection>.bson.gz` است. اگر فایل چندبخشی بود، اول همه‌ی بخش‌ها را دانلود کن و آن‌ها را به ترتیب متصل کن. در Linux/macOS برای یک بکاپ سه‌بخشی:
 
 ```bash
-cat rps-mongodb-<timestamp>.zip.part001-of-003 \
-    rps-mongodb-<timestamp>.zip.part002-of-003 \
-    rps-mongodb-<timestamp>.zip.part003-of-003 \
-    > rps-mongodb-<timestamp>.zip
-unzip -t rps-mongodb-<timestamp>.zip
-unzip rps-mongodb-<timestamp>.zip -d restore-point
+cat gd-mongodb-<timestamp>.zip.part001-of-003 \
+    gd-mongodb-<timestamp>.zip.part002-of-003 \
+    gd-mongodb-<timestamp>.zip.part003-of-003 \
+    > gd-mongodb-<timestamp>.zip
+unzip -t gd-mongodb-<timestamp>.zip
+unzip gd-mongodb-<timestamp>.zip -d restore-point
 ```
 
 تعداد و نام واقعی بخش‌ها را جایگزین کن. سپس بعد از بررسی URI مقصد و توقف Workerهای برنامه، پوشه‌ی BSON را بازیابی کن:
@@ -67,7 +67,6 @@ mongorestore --uri="$RESTORE_MONGO_URI" --gzip --drop restore-point/dump
 ## ۸. بررسی پیش از استفاده‌ی واقعی
 
 فایل‌ها از نظر syntax با TypeScript transpile بررسی شده‌اند؛ این بررسی به‌تنهایی جایگزین `npm run typecheck`، بیلد و تست یکپارچه نیست. بعد از نصب وابستگی‌ها در سرور مقصد، برای هر سرویس `typecheck`, `test` و `build` را اجرا کن. یک ZIP واقعی را دانلود/بازسازی کن و حتماً یک restore آزمایشی در staging انجام بده، قبل از اینکه به بکاپ‌ها برای بازیابی production تکیه کنی.
-
 
 ## نکته‌های پیاده‌سازی رنگ دکمه و watchdog
 

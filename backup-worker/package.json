@@ -1,5 +1,5 @@
 {
-  "name": "rps-backup-worker",
+  "name": "gd-backup-worker",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node .",
     "build": "tsc && tsc-alias --resolve-full-paths --resolve-full-extension .js",
+    "decrypt-backup": "node ./dist/scripts/decrypt-backup.js",
     "start:prod": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts"
@@ -24,6 +25,7 @@
     "esbuild": "latest",
     "tsx": "^4.19.0",
     "typescript": "^5.5.0",
-    "@types/archiver": "^6.0.3"
+    "@types/archiver": "^6.0.3",
+    "tsc-alias": "^1.9.9"
   }
 }

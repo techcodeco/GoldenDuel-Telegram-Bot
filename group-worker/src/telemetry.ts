@@ -13,7 +13,7 @@ const BOT_NAMESPACE = crypto
   .update(MONITORING_NAMESPACE)
   .digest("hex")
   .slice(0, 12);
-export const SERVER_TELEMETRY_PREFIX = `rps:${BOT_NAMESPACE}:ops:instance:`;
+export const SERVER_TELEMETRY_PREFIX = `gd:${BOT_NAMESPACE}:ops:instance:`;
 const INTERVAL_MS = Math.max(
   3000,
   Number(process.env.SERVER_METRICS_INTERVAL_MS ?? 5000) || 5000,
@@ -113,14 +113,12 @@ export async function startServerTelemetry(
     if (stopped) return;
     stopped = true;
     clearInterval(timer);
-    await redis
-      .del(key)
-      .catch((error) =>
-        logError("server_telemetry_cleanup_failed", error, {
-          service,
-          serverName,
-          instanceName,
-        }),
-      );
+    await redis.del(key).catch((error) =>
+      logError("server_telemetry_cleanup_failed", error, {
+        service,
+        serverName,
+        instanceName,
+      }),
+    );
   };
 }

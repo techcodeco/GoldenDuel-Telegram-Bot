@@ -1,11 +1,11 @@
 const setWebHook = async () => {
   const res = await fetch(
-    `https://api.telegram.org/bot8710819629:AAGjPOM6HOIneAwlMHO3rC9EMujRCo14FLg/setWebhook`,
+    `https://api.telegram.org/bot8955725307:AAG7DvFAtFqAgJqPeqGY2EtXtqVbbV22ZOI/setWebhook`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        url: `https://dezhbanbot.ir/webhook/114c88c14ba9151890dc0fe9f3c72e00a515edec3f44a60b`, // Telegram passes the token back in the path
+        url: `https://dezhbanbot.ir/webhook/DHMuyh4AMwkIJEpTUOfUYvRe4hYnW8IZWy6cmi9aOj0MMTechCode`, // Telegram passes the token back in the path
         max_connections: 100,
         drop_pending_updates: false,
         allowed_updates: [

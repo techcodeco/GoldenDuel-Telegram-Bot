@@ -1,11 +1,12 @@
 {
-  "name": "rps-broadcast-worker",
+  "name": "gd-broadcast-worker",
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "main": "./dist/main.js",
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx watch src/main.ts",
-    "start": "tsx src/main.ts",
+    "start": "node .",
     "build": "tsc && tsc-alias --resolve-full-paths --resolve-full-extension .js",
     "start:prod": "cross-env NODE_ENV=production node dist/main.js",
     "typecheck": "tsc --noEmit"
@@ -26,6 +27,7 @@
     "cross-env": "^7.0.3",
     "esbuild": "latest",
     "tsx": "^4.19.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "tsc-alias": "^1.9.9"
   }
 }

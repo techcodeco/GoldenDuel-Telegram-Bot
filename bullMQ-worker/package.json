@@ -1,5 +1,5 @@
 {
-  "name": "rps-bullmq-worker",
+  "name": "gd-bullmq-worker",
   "version": "1.0.0",
   "private": true,
   "type": "module",
