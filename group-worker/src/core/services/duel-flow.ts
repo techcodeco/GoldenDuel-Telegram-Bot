@@ -6,6 +6,7 @@ import { setFlow, reserve, release } from './wallet'
 import { scheduleGroupInviteTimeout } from './timing'
 import { deleteEphemeralMessage, editEphemeralMessage, sendEphemeralMessage } from '../bot/ephemeral'
 import { groupModeNeedsStake, type GroupFlow, type GroupCurrency, type GroupMode, type MessageReference } from '../contracts/group'
+import { sendGroupDuelNotice, deleteDuelPublicNotices } from './game-message'
 import { logError } from '../logger'
 
 async function buildStartKeyboard(lang: 'fa' | 'en') {
@@ -214,7 +215,7 @@ export async function createInvite(uid: number, flow: GroupFlow, amount: number,
       await GroupDuel.create([{
         _id: id, chatId: flow.chatId, activatorId: cfg.activatorId, initiatorId: uid, opponentId: flow.targetId,
         currency, amount: stake, mode, status: 'pending', inviteDeadline, triggerMessageId: flow.triggerMessageId,
-        p1Choice: null, p2Choice: null, reminderSent: false,
+        p1Choice: null, p2Choice: null, reminderSent: false, lifecycleVersion: 2, publicNoticeMessageIds: [],
       }], { session })
     })
   } finally {
@@ -235,10 +236,18 @@ export async function createInvite(uid: number, flow: GroupFlow, amount: number,
     `✅ دعوت خصوصی برای ${targetMention} ارسال شد.\n${stakeLineFa}\nتا پاسخ حریف منتظر بمان یا دعوت را لغو کن.`,
     `✅ A private invitation was sent to ${targetMention}.\n${stakeLineEn}\nWait for the response or cancel the invitation.`,
   )
+  const publicInviteText = tr(lang,
+    `⚔️ ${actorMention} کاربر ${targetMention} را به یک دوئل ${modeLabel} دعوت کرد.${stakeLineFa}`,
+    `⚔️ ${actorMention} challenged ${targetMention} to a ${modeLabel} duel.${stakeLineEn}`,
+  )
 
   let opponentCard: any
   let initiatorCard: any
   try {
+    // Public, notification-capable group announcement comes first. The actionable
+    // invitation remains an ephemeral card visible only to the invited opponent.
+    const publicInviteMessageId = await sendGroupDuelNotice(id, Number(flow.chatId), publicInviteText)
+
     // Persist the challenger's waiting card before exposing the opponent's
     // actionable invitation. This closes the fast-accept race where the
     // opponent could accept before X's cancel-card ID had been stored.
@@ -263,13 +272,15 @@ export async function createInvite(uid: number, flow: GroupFlow, amount: number,
       .text(tr(lang, '❌ رد', '❌ Reject'), `gw:reject:${id}`))
     opponentCard = await sendEphemeralMessage(Number(flow.chatId), flow.targetId, inviteText, {
       parse_mode: 'HTML', reply_markup: { inline_keyboard: inviteKeyboard.inline_keyboard },
-    })
+    }, { replyMessageId: publicInviteMessageId })
     const savedInvite = await GroupDuel.updateOne({ _id: id, status: 'pending' }, { $set: {
       opponentInviteEphemeralId: Number(opponentCard?.ephemeral_message_id),
     } })
     if (!savedInvite.modifiedCount) throw new Error('OPPONENT_INVITE_CARD_STATE_CHANGED')
   } catch (error) {
     if (opponentCard?.ephemeral_message_id) await deleteEphemeralMessage(Number(flow.chatId), flow.targetId, Number(opponentCard.ephemeral_message_id)).catch(() => undefined)
+    const failedDuel = await GroupDuel.findById(id).lean() as any
+    if (failedDuel) await deleteDuelPublicNotices(failedDuel)
     if (initiatorCard?.ephemeral_message_id) {
       const sameAsFlow = Number(formRef?.ephemeralMessageId) === Number(initiatorCard.ephemeral_message_id)
         && Number(formRef?.receiverUserId) === uid

@@ -265,14 +265,19 @@ export const adminSettingsKeyboard = (s: Settings) =>
 
 export const membershipKeyboard = (channels: Array<{ title: string; url: string; kind?: 'channel' | 'group' | 'supergroup' }>, lang: Lang) => {
   const kb = new InlineKeyboard()
-  for (const ch of channels) kb.url(`${ch.kind && ch.kind !== 'channel' ? '👥' : '📢'} ${ch.title.slice(0, 45)}`, ch.url).row()
+  for (const ch of channels) kb.url(`${ch.kind && ch.kind !== 'channel' ? '👥' : '📢'} ${truncateCodePoints(ch.title, 45)}`, ch.url).row()
   kb.text(lang === 'fa' ? '✅ بررسی عضویت' : '✅ Check membership', 'membership:check')
   return styleInline(kb)
 }
 
+function truncateCodePoints(value: string, max: number): string {
+  // String.slice counts UTF-16 code units and can split surrogate pairs in emoji.
+  return Array.from(String(value ?? '')).slice(0, max).join('')
+}
+
 export const adminChannelsKeyboard = (channels: Array<{ title: string; url: string; chatId: string; kind?: 'channel' | 'group' | 'supergroup' }>) => {
   const kb = new InlineKeyboard()
-  channels.forEach((ch, i) => kb.text(`🗑 ${i + 1}. ${ch.kind && ch.kind !== 'channel' ? '👥' : '📢'} ${ch.title.slice(0, 31)}`, `admch:del:${i}`).row())
+  channels.forEach((ch, i) => kb.text(`🗑 ${i + 1}. ${ch.kind && ch.kind !== 'channel' ? '👥' : '📢'} ${truncateCodePoints(ch.title, 31)}`, `admch:del:${i}`).row())
   kb.text('➕ افزودن گروه / کانال', 'admch:add').row()
   kb.text('⬅️ بازگشت به تنظیمات', 'admin:settings')
   return styleInline(kb)

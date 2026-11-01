@@ -195,6 +195,7 @@ export async function reconcileDuelJobs(fullScan = false): Promise<void> {
   // after committing the wallet transaction but before sending both cards.
   const pendingGroupFollowups = await GroupDuel.find({
     status: 'settled',
+    lifecycleVersion: 2,
     $or: [
       { timeoutSettled: true, timeoutResultSentAt: { $exists: false } },
       { rematchFormsSent: { $ne: true } },

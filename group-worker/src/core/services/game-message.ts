@@ -84,7 +84,10 @@ export async function gameProgressText(duel: any) {
 }
 
 /** Creates one independent private-in-group move form for each participant. */
-export async function sendPlayerGameForms(duel: any): Promise<void> {
+export async function sendPlayerGameForms(
+  duel: any,
+  replyMessageId?: number,
+): Promise<void> {
   const lang = langOf(
     (
       (await GroupConfig.findOne({ chatId: String(duel.chatId) })
@@ -107,6 +110,7 @@ export async function sendPlayerGameForms(duel: any): Promise<void> {
         parse_mode: "HTML",
         reply_markup: markup,
       },
+      replyMessageId ? { replyMessageId } : {},
     );
     const firstStored = await GroupDuel.updateOne(
       {
@@ -129,6 +133,7 @@ export async function sendPlayerGameForms(duel: any): Promise<void> {
         parse_mode: "HTML",
         reply_markup: markup,
       },
+      replyMessageId ? { replyMessageId } : {},
     );
     const stored = await GroupDuel.updateOne(
       {
@@ -325,12 +330,91 @@ export async function disableGameMessage(
     .catch(() => undefined);
 }
 
+export async function sendGroupDuelNotice(
+  duelId: string,
+  chatId: number | string,
+  text: string,
+  replyMessageId?: number,
+): Promise<number> {
+  const options: any = { parse_mode: "HTML", disable_notification: false };
+  if (replyMessageId)
+    options.reply_parameters = { message_id: Number(replyMessageId) };
+  const sent = await bot.api.sendMessage(Number(chatId), text, options);
+  const messageId = Number((sent as any)?.message_id) || 0;
+  if (!messageId) throw new Error("GROUP_NOTICE_MESSAGE_ID_MISSING");
+  try {
+    const saved = await GroupDuel.updateOne(
+      { _id: duelId },
+      { $addToSet: { publicNoticeMessageIds: messageId } },
+    );
+    if (!saved.matchedCount) throw new Error("GROUP_NOTICE_DUEL_NOT_FOUND");
+    return messageId;
+  } catch (error) {
+    // Never leave an untracked public notice behind if persistence fails.
+    await bot.api
+      .deleteMessage(Number(chatId), messageId)
+      .catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function deleteDuelPublicNotices(duel: any): Promise<void> {
+  if (!duel?.chatId) return;
+  // Re-read the durable list so a reminder posted concurrently with settlement
+  // cannot survive as an orphaned public message.
+  const current = duel._id
+    ? ((await GroupDuel.findById(String(duel._id))
+        .select(
+          "publicNoticeMessageIds gameMessageId inviteMessageId resultMessageId",
+        )
+        .lean()) as any)
+    : null;
+  const resultId =
+    Number(duel.resultMessageId ?? current?.resultMessageId) || 0;
+  const ids = [
+    ...new Set(
+      [
+        ...(Array.isArray(duel.publicNoticeMessageIds)
+          ? duel.publicNoticeMessageIds.map(Number)
+          : []),
+        ...(Array.isArray(current?.publicNoticeMessageIds)
+          ? current.publicNoticeMessageIds.map(Number)
+          : []),
+        Number(duel.gameMessageId ?? current?.gameMessageId) || 0,
+        Number(duel.inviteMessageId ?? current?.inviteMessageId) || 0,
+      ].filter((id) => id > 0 && id !== resultId),
+    ),
+  ];
+  await Promise.all(
+    ids.map((messageId) =>
+      bot.api
+        .deleteMessage(Number(duel.chatId), messageId)
+        .catch(() => undefined),
+    ),
+  );
+}
+
 export async function replyToGameMessage(duel: any, text: string) {
   const options: any = { parse_mode: "HTML" };
-  if (duel.gameMessageId)
-    options.reply_parameters = { message_id: Number(duel.gameMessageId) };
-  else if (duel.inviteMessageId)
-    options.reply_parameters = { message_id: Number(duel.inviteMessageId) };
+  const notices = Array.isArray(duel.publicNoticeMessageIds)
+    ? duel.publicNoticeMessageIds
+    : [];
+  const latestNoticeId = Number(notices[notices.length - 1]) || 0;
+  const anchorId =
+    latestNoticeId ||
+    Number(duel.gameMessageId) ||
+    Number(duel.inviteMessageId) ||
+    0;
+  if (anchorId) {
+    try {
+      return await bot.api.sendMessage(Number(duel.chatId), text, {
+        ...options,
+        reply_parameters: { message_id: anchorId },
+      });
+    } catch {
+      // A reminder can be removed concurrently with settlement; do not lose the result.
+    }
+  }
   return bot.api.sendMessage(Number(duel.chatId), text, options);
 }
 
@@ -356,9 +440,7 @@ export async function closeInviteKeyboard(duel: any) {
       .editMessageReplyMarkup(
         Number(duel.chatId),
         Number(duel.inviteMessageId),
-        {
-          reply_markup: { inline_keyboard: [] },
-        },
+        { reply_markup: { inline_keyboard: [] } },
       )
       .catch(() => undefined);
   }

@@ -189,6 +189,42 @@ async function postGroupReply(
   return bot.api.sendMessage(chatId, text, { parse_mode: "HTML" });
 }
 
+async function sendGroupDuelNotice(duelId: string, chatId: number, text: string, replyToMessageId?: number): Promise<number> {
+  const sent = await bot.api.sendMessage(chatId, text, {
+    parse_mode: "HTML",
+    disable_notification: false,
+    ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId } } : {}),
+  } as any);
+  const messageId = Number((sent as any)?.message_id) || 0;
+  if (!messageId) throw new Error("GROUP_NOTICE_MESSAGE_ID_MISSING");
+  try {
+    const stored = await GroupDuel.updateOne({ _id: duelId }, { $addToSet: { publicNoticeMessageIds: messageId } });
+    if (!stored.matchedCount) throw new Error("GROUP_NOTICE_DUEL_NOT_FOUND");
+    return messageId;
+  } catch (error) {
+    // Prevent an announcement from becoming an untracked orphan if MongoDB fails.
+    await bot.api.deleteMessage(chatId, messageId).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function deleteGroupDuelPublicNotices(duel: any): Promise<void> {
+  if (!duel?.chatId) return;
+  const current = duel._id
+    ? (await GroupDuel.findById(String(duel._id)).select("publicNoticeMessageIds gameMessageId inviteMessageId resultMessageId").lean()) as any
+    : null;
+  const keep = Number(duel.resultMessageId ?? current?.resultMessageId) || 0;
+  const ids = [...new Set([
+    ...(Array.isArray(duel.publicNoticeMessageIds) ? duel.publicNoticeMessageIds.map(Number) : []),
+    ...(Array.isArray(current?.publicNoticeMessageIds) ? current.publicNoticeMessageIds.map(Number) : []),
+    Number(duel.gameMessageId ?? current?.gameMessageId) || 0,
+    Number(duel.inviteMessageId ?? current?.inviteMessageId) || 0,
+  ].filter((id) => id > 0 && id !== keep))];
+  await Promise.all(ids.map((messageId) =>
+    bot.api.deleteMessage(Number(duel.chatId), messageId).catch(() => undefined),
+  ));
+}
+
 export async function processGroupInviteTimeout(
   id: string,
   deadline: number,
@@ -234,14 +270,26 @@ export async function processGroupInviteTimeout(
   if (!result) return;
 
   await removeInviteButtons(result);
+  await deleteGroupDuelPublicNotices(result);
+  const [initiator, opponent] = await Promise.all([
+    User.findOne({ tgId: Number(result.initiatorId) }).select("firstName lastName username").lean(),
+    User.findOne({ tgId: Number(result.opponentId) }).select("firstName lastName username").lean(),
+  ]);
   const config = (await GroupConfig.findOne({ chatId: String(result.chatId) }).select("language").lean()) as any;
   const lang = langOf(config?.language);
+  const p1 = mention(Number(result.initiatorId), initiator, lang);
+  const p2 = mention(Number(result.opponentId), opponent, lang);
   const text = tr(lang,
-    "⌛ مهلت دعوت تمام شد؛ مبلغ رزروشده، در صورت وجود، آزاد شد.",
-    "⌛ The invitation expired; any reserved stake has been released.",
+    `⌛ مهلت دعوت ${p1} از ${p2} تمام شد؛ مبلغ رزروشده، در صورت وجود، آزاد شد.`,
+    `⌛ ${p1}’s invitation to ${p2} expired; any reserved stake was released.`,
   );
+  if (Number(result.lifecycleVersion) === 2) {
+    await sendGroupDuelNotice(id, Number(result.chatId), text).catch((error) =>
+      logError("group_invite_timeout_public_notice_failed", error, { id, chatId: result.chatId }),
+    );
+  }
   await Promise.all([Number(result.initiatorId), Number(result.opponentId)].map((uid) =>
-    sendPrivateGroupMessage(Number(result.chatId), uid, text).catch((error) =>
+    sendPrivateGroupMessage(Number(result.chatId), uid, text, { parse_mode: "HTML" }).catch((error) =>
       logError("group_invite_timeout_private_notice_failed", error, { id, uid }),
     ),
   ));
@@ -253,7 +301,7 @@ export async function processGroupMatchReminder(
   scheduleSuccessor: (id: string, reminderAt: number) => Promise<void>,
 ): Promise<void> {
   const found = (await GroupDuel.findOne({ _id: id, status: "choosing" })
-    .select("_id chatId initiatorId opponentId p1Choice p2Choice reminderAt reminderSent reminderProcessingAt deadline initiatorGameEphemeralId opponentGameEphemeralId gameFormsSent")
+    .select("_id chatId initiatorId opponentId p1Choice p2Choice reminderAt reminderSent reminderProcessingAt deadline initiatorGameEphemeralId opponentGameEphemeralId gameFormsSent lifecycleVersion")
     .lean()) as any;
   if (!found || found.reminderSent) return;
 
@@ -288,7 +336,7 @@ export async function processGroupMatchReminder(
 
   try {
     const latest = (await GroupDuel.findOne({ _id: id, status: "choosing", deadline: { $gt: Date.now() } })
-      .select("_id chatId initiatorId opponentId p1Choice p2Choice initiatorGameEphemeralId opponentGameEphemeralId deadline")
+      .select("_id chatId initiatorId opponentId p1Choice p2Choice initiatorGameEphemeralId opponentGameEphemeralId deadline lifecycleVersion publicNoticeMessageIds reminderAnnouncementMessageId")
       .lean()) as any;
     if (!latest) return;
     if (latest.p1Choice && latest.p2Choice) {
@@ -321,6 +369,35 @@ export async function processGroupMatchReminder(
           `${timeEn}\n${missing1 ? p1 : p2} has not chosen yet. Please choose now.`,
         );
     const markup = groupMoveKeyboard(id, lang);
+    let reminderNoticeId = 0;
+    if (Number(latest.lifecycleVersion) === 2) {
+      reminderNoticeId = Number(latest.reminderAnnouncementMessageId) || 0;
+      if (!reminderNoticeId) {
+        reminderNoticeId = await sendGroupDuelNotice(id, Number(latest.chatId), text);
+        await GroupDuel.updateOne(
+          { _id: id, status: "choosing", reminderAnnouncementMessageId: { $exists: false } },
+          { $set: { reminderAnnouncementMessageId: reminderNoticeId } },
+        );
+      }
+      // Keep only the newest public status message while the duel is running.
+      const oldNoticeIds = (Array.isArray(latest.publicNoticeMessageIds) ? latest.publicNoticeMessageIds : [])
+        .map(Number).filter((messageId: number) => messageId > 0 && messageId !== reminderNoticeId);
+      await Promise.all(oldNoticeIds.map((messageId: number) =>
+        bot.api.deleteMessage(Number(latest.chatId), messageId).catch(() => undefined),
+      ));
+      await GroupDuel.updateOne({ _id: id, status: "choosing" }, { $set: { publicNoticeMessageIds: [reminderNoticeId] } });
+      const stillChoosing = await GroupDuel.findOne({ _id: id, status: "choosing", deadline: { $gt: Date.now() } })
+        .select("_id")
+        .lean();
+      if (!stillChoosing) {
+        await bot.api.deleteMessage(Number(latest.chatId), reminderNoticeId).catch(() => undefined);
+        await GroupDuel.updateOne({ _id: id }, {
+          $pull: { publicNoticeMessageIds: reminderNoticeId },
+          $unset: { reminderAnnouncementMessageId: 1 },
+        });
+        return;
+      }
+    }
 
     const pending: Array<{ uid: number; field: string; oldId: number }> = [];
     if (missing1) pending.push({ uid: Number(latest.initiatorId), field: "initiatorGameEphemeralId", oldId: Number(latest.initiatorGameEphemeralId) });
@@ -358,10 +435,10 @@ export async function processGroupMatchReminder(
         newId = await sendPrivateGroupMessage(Number(latest.chatId), player.uid, text, {
           parse_mode: "HTML",
           reply_markup: markup,
-        });
+        }, reminderNoticeId || undefined);
       }
       const stored = await GroupDuel.updateOne(
-        { _id: id, status: "choosing", [player.field]: oldId || { $in: [null, undefined] } },
+        { _id: id, status: "choosing", [player.field]: oldId > 0 ? oldId : null },
         { $set: { [player.field]: newId } },
       );
       if (!stored.modifiedCount) {
@@ -404,6 +481,7 @@ export async function processGroupMatchTimeout(
   let result: any = (await GroupDuel.findOne({
     _id: id,
     status: "settled",
+    lifecycleVersion: 2,
     $or: [
       { timeoutSettled: true, timeoutResultSentAt: { $exists: false } },
       { rematchFormsSent: { $ne: true } },
@@ -691,6 +769,7 @@ export async function processGroupMatchTimeout(
           houseFee,
           payout1,
           payout2,
+          timeoutSettled: true,
           settledAt: new Date(),
         };
       });
@@ -705,6 +784,7 @@ export async function processGroupMatchTimeout(
   if (!result) return;
   if (result.cancelled) {
     await cleanupPrivateGroupCards(result);
+    await deleteGroupDuelPublicNotices(result);
     const config = (await GroupConfig.findOne({ chatId: String(result.chatId) }).select("language").lean()) as any;
     const lang = langOf(config?.language);
     const text = duelHasStake(result)
@@ -799,12 +879,16 @@ export async function processGroupMatchTimeout(
   // The timeout result is the only public game message. Once its ID and sent
   // marker are saved, later recovery runs only repair private rematch cards.
   let publicResultId = Number(result.resultMessageId) || 0;
-  const shouldPublishTimeoutResult = result.timeoutSettled === true && !result.timeoutResultSentAt;
+  const shouldPublishTimeoutResult = (result.timeoutSettled === true || Number(result.lifecycleVersion) === 2)
+    && !result.timeoutResultSentAt
+    && !(Number(result.resultMessageId) > 0);
   if (shouldPublishTimeoutResult) {
     let publicResult: any = null;
+    const noticeIds = Array.isArray(result.publicNoticeMessageIds) ? result.publicNoticeMessageIds : [];
+    const latestNoticeId = Number(noticeIds[noticeIds.length - 1]) || 0;
     await postGroupReply(
       Number(result.chatId),
-      Number(result.gameMessageId) || Number(result.inviteMessageId) || undefined,
+      latestNoticeId || Number(result.gameMessageId) || Number(result.inviteMessageId) || undefined,
       resultText,
     ).then((sent) => { publicResult = sent; }).catch((error: unknown) => {
       logError("group_timeout_result_send_failed", error, {
@@ -816,8 +900,11 @@ export async function processGroupMatchTimeout(
       throw error;
     });
     publicResultId = Number(publicResult?.message_id) || 0;
+    if (!(publicResultId > 0)) throw new Error("GROUP_TIMEOUT_RESULT_MESSAGE_ID_MISSING");
     const marked = await GroupDuel.updateOne(
-      { _id: id, status: "settled", timeoutSettled: true, timeoutResultSentAt: { $exists: false } },
+      { _id: id, status: "settled", timeoutResultSentAt: { $exists: false }, $or: [
+        { resultMessageId: { $exists: false } }, { resultMessageId: null }, { resultMessageId: 0 },
+      ] },
       { $set: { timeoutResultSentAt: new Date(), ...(publicResultId > 0 ? { resultMessageId: publicResultId } : {}) } },
     );
     if (!marked.modifiedCount) {
@@ -827,11 +914,11 @@ export async function processGroupMatchTimeout(
     }
   }
 
+  await deleteGroupDuelPublicNotices({ ...result, resultMessageId: publicResultId });
+
+  if (Number(result.lifecycleVersion) === 2) {
   const rematchKeyboard = { inline_keyboard: [[{ text: tr(lang, "🔁 شروع دوباره", "🔁 Rematch"), callback_data: `gw:rematch:${id}`, style: "primary" }]] };
-  const rematchText = tr(lang,
-    `🔁 رقابت پایان یافت. برای دعوت دوباره از حریف، دکمهٔ زیر را بزن.\n${p1} · ${p2}${showStake ? `\n💰 مبلغ هر بازیکن: ${fmt(Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}` : "\n🆓 بدون شرط مالی"}`,
-    `🔁 The duel has finished. Tap below to invite your opponent to a rematch.\n${p1} · ${p2}${showStake ? `\n💰 Stake per player: ${fmt(Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}` : "\n🆓 No stake"}`,
-  );
+  const rematchText = "\u2063";
   try {
     let initiatorCardId = Number(result.initiatorRematchEphemeralId) || 0;
     let opponentCardId = Number(result.opponentRematchEphemeralId) || 0;
@@ -855,6 +942,7 @@ export async function processGroupMatchTimeout(
     logError("group_timeout_rematch_forms_failed", error, { id });
     // Re-throw so BullMQ retries; each successfully delivered card ID is persisted individually.
     throw error;
+  }
   }
 
   if (result.timeoutSettled === true && Number(result.reward) > 0) {

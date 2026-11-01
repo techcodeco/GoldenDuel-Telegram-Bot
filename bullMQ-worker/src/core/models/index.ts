@@ -446,7 +446,7 @@ export const GroupDuel = model('GroupDuel', new Schema({
   triggerMessageId: Number, opponentInviteEphemeralId: Number, initiatorWaitEphemeralId: Number,
   initiatorGameEphemeralId: Number, opponentGameEphemeralId: Number, initiatorRematchEphemeralId: Number,
   opponentRematchEphemeralId: Number, gameFormsSent: { type: Boolean, default: false }, rematchFormsSent: { type: Boolean, default: false }, resultMessageId: Number,
-  rematchOf: { type: String, index: true }, rematchDuelId: String,
+  rematchOf: { type: String, index: true }, rematchDuelId: String, lifecycleVersion: Number, publicNoticeMessageIds: { type: [Number], default: [] }, reminderAnnouncementMessageId: Number,
 }, { timestamps: true, versionKey: false, strict: false }))
 GroupDuel.schema.index({ status: 1, inviteDeadline: 1 })
 GroupDuel.schema.index({ status: 1, deadline: 1 })

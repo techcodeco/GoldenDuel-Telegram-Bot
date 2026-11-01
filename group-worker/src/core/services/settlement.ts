@@ -3,7 +3,7 @@ import mongoose from 'mongoose'
 import { InlineKeyboard } from 'grammy'
 import { bot, langOf, tr, curLabel, fmt, mention, getUser } from '../runtime'
 import { GroupConfig, GroupDuel, Settings, User, Ledger, House } from '../models/index'
-import { disableGameMessage, replyToGameMessage } from './game-message'
+import { disableGameMessage, replyToGameMessage, deleteDuelPublicNotices } from './game-message'
 import { sendEphemeralMessage } from '../bot/ephemeral'
 import { groupDuelHasStake } from '../contracts/group'
 
@@ -174,11 +174,17 @@ export async function settleDuel(id: string, timeout = false) {
   let resultMessage: any = null
   try {
     resultMessage = await replyToGameMessage(final, resultText)
-    if (Number(resultMessage?.message_id) > 0) await GroupDuel.updateOne({ _id: id, status: 'settled' }, { $set: { resultMessageId: Number(resultMessage.message_id) } })
+    if (Number(resultMessage?.message_id) > 0) {
+      await GroupDuel.updateOne({ _id: id, status: 'settled' }, { $set: { resultMessageId: Number(resultMessage.message_id) } })
+      // Keep the result as the only public duel message once it has been posted.
+      const savedResultState = await GroupDuel.findById(id).lean() as any
+      await deleteDuelPublicNotices({ ...(savedResultState ?? final), resultMessageId: Number(resultMessage.message_id) })
+    }
   } catch (error) {
     logError('group_result_message_failed', error, { duelId: id })
   }
 
+  if (Number(final.lifecycleVersion) === 2) {
   // Each participant gets their own rematch control; no callback button is exposed publicly.
   const rematchKeyboard = new InlineKeyboard().text(tr(lang, '🔁 شروع دوباره', '🔁 Rematch'), `gw:rematch:${id}`)
   for (const row of rematchKeyboard.inline_keyboard) for (const button of row) (button as any).style = 'success'
@@ -212,7 +218,7 @@ export async function settleDuel(id: string, timeout = false) {
     logError('group_rematch_forms_failed', error, { duelId: id })
     // BullMQ reconciliation retries any settled duel whose rematchFormsSent flag is still false.
   }
-
+  }
 
   if (Number(final.reward) > 0) {
     const groupTitle = String(group?.title ?? tr(lang, 'گروه تلگرام', 'Telegram group'))
