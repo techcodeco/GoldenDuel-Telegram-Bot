@@ -22,7 +22,13 @@ import {
   createTonDepositInvoice,
   checkTonDeposit,
 } from "../services/tonPayments";
-import { BroadcastCampaign, GroupTarget, Ledger, Ticket } from "../models";
+import {
+  BroadcastCampaign,
+  GroupTarget,
+  Ledger,
+  Ticket,
+  Match,
+} from "../models";
 import { redis } from "../redis";
 import { BACKUP_CONFIG_KEY, BACKUP_COMMAND_CHANNEL } from "../telemetry";
 import {
@@ -82,7 +88,6 @@ import {
   amountKeyboard,
   balanceActionsKeyboard,
   cancelKeyboard,
-  duelModeKeyboard,
   adminMenuKeyboard,
   profileKeyboard,
   curName,
@@ -105,20 +110,22 @@ const say = (
 ) => ctx.reply(t(ctx.lang, key, params), { parse_mode: "HTML", ...extra });
 const quiet = <T>(p: Promise<T>) => p.catch(() => undefined);
 
-type RequiredChannel = { chatId: string; title: string; url: string };
+type RequiredChannel = {
+  chatId: string;
+  title: string;
+  url: string;
+  kind?: "channel" | "group" | "supergroup";
+};
 type MembershipResult = { ok: boolean; unavailable: boolean };
 
 async function checkRequiredMembership(
   userId: number,
   channels: RequiredChannel[],
-  force = false,
+  _force = false,
 ): Promise<MembershipResult> {
   if (!channels.length) return { ok: true, unavailable: false };
-  const cacheKey = `membership:check:${userId}:${(await getSettings()).version}`;
-  if (!force) {
-    const cached = await redis.get(cacheKey);
-    if (cached) return JSON.parse(cached) as MembershipResult;
-  }
+  // Do not cache positive membership: a user who leaves a required destination
+  // must be blocked on the very next interaction, not for a stale cache window.
   let unavailable = false;
   let allMember = true;
   for (const channel of channels) {
@@ -128,16 +135,14 @@ async function checkRequiredMembership(
         member.status === "creator" ||
         member.status === "administrator" ||
         member.status === "member" ||
-        (member.status === "restricted" && member.is_member);
+        (member.status === "restricted" && member.is_member === true);
       if (!isMember) allMember = false;
     } catch {
       unavailable = true;
       allMember = false;
     }
   }
-  const result = { ok: allMember && !unavailable, unavailable };
-  await redis.set(cacheKey, JSON.stringify(result), "EX", 15);
-  return result;
+  return { ok: allMember && !unavailable, unavailable };
 }
 
 async function applyLanguageAndShowMenu(
@@ -153,7 +158,13 @@ async function applyLanguageAndShowMenu(
   let welcome = t(lang, "welcome", { name: esc(ctx.from!.first_name) });
   const cfg = await getSettings();
   const isAdmin = ctx.u?.role === "admin" || ctx.u?.role === "owner";
-  if (!isAdmin && cfg.membership.enabled && cfg.membership.channels.length) {
+  const membershipExempt =
+    ctx.u?.role === "owner" || OWNER_IDS.has(ctx.from!.id);
+  if (
+    !membershipExempt &&
+    cfg.membership.enabled &&
+    cfg.membership.channels.length
+  ) {
     const membership = await checkRequiredMembership(
       ctx.from!.id,
       cfg.membership.channels,
@@ -406,12 +417,12 @@ export function registerHandlers(): void {
       return;
     }
 
-    // Enforce channel membership on every interaction, and always re-check /start so leaving a channel
-    // cannot be bypassed by opening the bot again. Admins/owners are exempt to avoid locking out management.
+    // Enforce every required group/channel on every interaction, including /start.
+    // Only the owner is exempt; ordinary admins must satisfy the same membership rules.
     if (
       u?.lang &&
-      u.role !== "admin" &&
       u.role !== "owner" &&
+      !OWNER_IDS.has(from.id) &&
       !isMembershipCheck
     ) {
       const cfg = await getSettings();
@@ -522,6 +533,16 @@ export function registerHandlers(): void {
   });
 
   // Legacy callbacks are retained for messages sent by older versions.
+  bot.callbackQuery("dm:back", async (ctx) => {
+    await quiet(ctx.answerCallbackQuery());
+    await quiet(
+      ctx.editMessageText(t(ctx.lang, "menu.hint"), {
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: [] },
+      }),
+    );
+  });
+
   bot.callbackQuery("dm:bet", async (ctx) => {
     await quiet(ctx.answerCallbackQuery());
     await quiet(
@@ -593,12 +614,22 @@ export function registerHandlers(): void {
     );
   });
 
+  bot.callbackQuery("dq:back", async (ctx) => {
+    await quiet(ctx.answerCallbackQuery());
+    await quiet(
+      ctx.editMessageText(t(ctx.lang, "duel.choose_currency"), {
+        parse_mode: "HTML",
+        reply_markup: currencyKeyboard(ctx.lang, "dq:c"),
+      }),
+    );
+  });
+
   bot.callbackQuery(/^dq:a:(IRT|TON):(\d+)$/, async (ctx) => {
     await quiet(ctx.answerCallbackQuery());
     const cur = ctx.match[1] as Currency;
     const amount = Number(ctx.match[2]);
     const r = await joinDuel(ctx.from.id, cur, amount);
-    await quiet(ctx.editMessageReplyMarkup());
+    await quiet(ctx.deleteMessage());
     switch (r.status) {
       case "invalid":
         return void (await say(ctx, "duel.invalid"));
@@ -634,17 +665,196 @@ export function registerHandlers(): void {
   });
 
   bot.callbackQuery(/^dq:x:([\w-]+)$/, async (ctx) => {
-    await quiet(ctx.answerCallbackQuery());
-    await quiet(ctx.editMessageReplyMarkup());
+    const ticket = (await Ticket.findById(ctx.match[1]!)
+      .select("userId mode")
+      .lean()) as any;
     const r = await cancelTicket(ctx.from.id, ctx.match[1]!);
-    if (r === "cancelled")
-      await say(ctx, "duel.cancelled", undefined, {
-        reply_markup: mainKeyboard(
-          ctx.lang,
-          ctx.u?.role === "admin" || ctx.u?.role === "owner",
-        ),
-      });
-    else if (r === "late") await say(ctx, "duel.cancel_late");
+    if (r === "cancelled") {
+      const isFriendly = ticket?.mode === "friendly";
+      await quiet(
+        ctx.answerCallbackQuery({
+          text: t(
+            ctx.lang,
+            isFriendly ? "duel.cancelled_friendly" : "duel.cancelled_bet",
+          ),
+          show_alert: false,
+        }),
+      );
+      await quiet(ctx.deleteMessage());
+    } else if (r === "late") {
+      await quiet(
+        ctx.answerCallbackQuery({
+          text: t(ctx.lang, "duel.cancel_late").replace(/<[^>]+>/g, ""),
+          show_alert: true,
+        }),
+      );
+    } else {
+      await quiet(
+        ctx.answerCallbackQuery({
+          text: t(ctx.lang, "duel.cancel_late").replace(/<[^>]+>/g, ""),
+          show_alert: true,
+        }),
+      );
+    }
+  });
+
+  // Clear the rematch control under both private result messages after either player starts it.
+  async function removeRematchKeyboards(match: any): Promise<void> {
+    const refs: Array<[number, number | undefined]> = [
+      [Number(match.p1), Number(match.resultMessageId1) || undefined],
+      [Number(match.p2), Number(match.resultMessageId2) || undefined],
+    ];
+    await Promise.all(
+      refs.map(([chatId, messageId]) => {
+        if (!messageId) return Promise.resolve();
+        return quiet(
+          bot.api.editMessageReplyMarkup(chatId, messageId, {
+            reply_markup: { inline_keyboard: [] },
+          }),
+        );
+      }),
+    );
+  }
+
+  // ───────────── rematch from the result card ─────────────
+  bot.callbackQuery(/^rematch:([\w-]+)$/, async (ctx) => {
+    const matchId = ctx.match[1]!;
+    const previous = (await Match.findById(matchId).lean()) as any;
+    if (
+      !previous ||
+      previous.status !== "settled" ||
+      ![Number(previous.p1), Number(previous.p2)].includes(ctx.from.id)
+    ) {
+      await quiet(
+        ctx.answerCallbackQuery({
+          text:
+            ctx.lang === "fa"
+              ? "این دکمه برای شما معتبر نیست یا دوئل پیدا نشد."
+              : "This rematch button is invalid or the duel could not be found.",
+          show_alert: true,
+        }),
+      );
+      return;
+    }
+
+    if (previous.rematchStartedAt) {
+      await removeRematchKeyboards(previous);
+      await quiet(
+        ctx.answerCallbackQuery({
+          text: t(ctx.lang, "duel.rematch_already_started"),
+          show_alert: true,
+        }),
+      );
+      return;
+    }
+
+    // One rematch queue per finished match, even if both participants tap at once.
+    const lockKey = `rematch:click:${matchId}`;
+    const lock = await redis.set(lockKey, "1", "EX", 86400, "NX");
+    if (lock !== "OK") {
+      await quiet(
+        ctx.answerCallbackQuery({
+          text: t(ctx.lang, "duel.rematch_already_started"),
+          show_alert: true,
+        }),
+      );
+      return;
+    }
+
+    const mode = previous.mode === "friendly" ? "friendly" : "bet";
+    const currency = previous.currency as Currency;
+    const amount = mode === "friendly" ? 0 : Number(previous.amount);
+    try {
+      const r = await joinDuel(ctx.from.id, currency, amount, mode);
+      if (r.status === "queued") {
+        let sent: any;
+        try {
+          sent = await ctx.reply(
+            mode === "friendly"
+              ? t(ctx.lang, "duel.searching_friendly", {
+                  duration: durationLabel(r.seconds, ctx.lang),
+                })
+              : t(ctx.lang, "duel.searching", {
+                  amount: formatAmount(amount, currency),
+                  cur: curName(ctx.lang, currency),
+                  duration: durationLabel(r.seconds, ctx.lang),
+                }),
+            {
+              parse_mode: "HTML",
+              reply_markup: cancelKeyboard(ctx.lang, r.ticketId),
+            },
+          );
+        } catch (sendError) {
+          // Do not leave a reserved stake in the queue if the rematch search card cannot be shown.
+          await cancelTicket(ctx.from.id, r.ticketId).catch(() => undefined);
+          throw sendError;
+        }
+        await Match.updateOne(
+          { _id: matchId, status: "settled" },
+          {
+            $set: {
+              rematchStartedBy: ctx.from.id,
+              rematchStartedAt: new Date(),
+            },
+          },
+        );
+        const latest = (await Match.findById(matchId).lean()) as any;
+        await removeRematchKeyboards(latest ?? previous);
+        await quiet(
+          ctx.answerCallbackQuery({
+            text: t(ctx.lang, "duel.rematch_search_started"),
+          }),
+        );
+        return sent;
+      }
+      if (r.status === "matched") {
+        await Match.updateOne(
+          { _id: matchId, status: "settled" },
+          {
+            $set: {
+              rematchStartedBy: ctx.from.id,
+              rematchStartedAt: new Date(),
+            },
+          },
+        );
+        const latest = (await Match.findById(matchId).lean()) as any;
+        await removeRematchKeyboards(latest ?? previous);
+        await quiet(
+          ctx.answerCallbackQuery({
+            text: t(ctx.lang, "duel.rematch_started"),
+          }),
+        );
+        return;
+      }
+
+      await redis.del(lockKey);
+      const key =
+        r.status === "busy"
+          ? "duel.busy"
+          : r.status === "insufficient"
+            ? "duel.insufficient"
+            : r.status === "disabled"
+              ? "duel.disabled"
+              : "duel.invalid";
+      await quiet(
+        ctx.answerCallbackQuery({
+          text: t(ctx.lang, key).replace(/<[^>]+>/g, ""),
+          show_alert: true,
+        }),
+      );
+    } catch (error) {
+      await redis.del(lockKey);
+      logError("rematch_start_failed", error, { matchId, userId: ctx.from.id });
+      await quiet(
+        ctx.answerCallbackQuery({
+          text:
+            ctx.lang === "fa"
+              ? "شروع دوباره انجام نشد؛ دوباره تلاش کن."
+              : "Could not start the rematch. Please try again.",
+          show_alert: true,
+        }),
+      );
+    }
   });
 
   // ───────────── duel: picking a move ─────────────
@@ -681,6 +891,7 @@ export function registerHandlers(): void {
       await quiet(
         ctx.editMessageText(t(ctx.lang, confirmationKey), {
           parse_mode: "HTML",
+          reply_markup: { inline_keyboard: [] },
         }),
       );
       if (r === "saved")
@@ -1409,6 +1620,38 @@ async function runButton(ctx: any, btn: ButtonKey): Promise<void> {
       return void (await say(ctx, "duel.choose_currency", undefined, {
         reply_markup: currencyKeyboard(lang, "dq:c"),
       }));
+    }
+    case "btn.add_group": {
+      const me = await bot.api.getMe();
+      if (!me.username) {
+        return void (await ctx.reply(
+          lang === "fa"
+            ? "⚠️ برای ساخت لینک افزودن گروه، نام کاربری عمومی ربات تنظیم نشده است."
+            : "⚠️ The bot does not have a public username, so a group-add link cannot be created.",
+        ));
+      }
+      const url = `https://t.me/${me.username}?startgroup&admin=delete_messages`;
+      return void (await ctx.reply(
+        lang === "fa"
+          ? "برای افزودن ربات به گروه، دکمهٔ زیر را بزن."
+          : "Tap below to add the bot to a group.",
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text:
+                    lang === "fa"
+                      ? "👥 افزودن ربات به گروه"
+                      : "👥 Add bot to group",
+                  url,
+                  style: "success",
+                },
+              ],
+            ],
+          } as any,
+        },
+      ));
     }
     case "btn.friendly": {
       const r = await joinDuel(ctx.from!.id, "IRT", 0, "friendly");

@@ -7,7 +7,7 @@ import { BACKUP_STATUS_KEY, BACKUP_CONFIG_KEY, BACKUP_HISTORY_KEY, BACKUP_COMMAN
 import { Address } from '@ton/core'
 import { logError } from '../logger'
 import { CURRENCIES, type Currency, type MoneyCurrency, formatAmount, isCurrency, normalizeDigits, parseAmount } from '../money'
-import { AdminLog, BroadcastCampaign, GroupTarget, House, Ledger, ManualDepositInvoice, Match, Payment, Ticket, TonDepositInvoice, User, Withdrawal, type IManualDepositInvoice } from '../models'
+import { AdminLog, BroadcastCampaign, GroupTarget, House, Ledger, ManualDepositInvoice, Match, GroupDuel, Payment, Ticket, TonDepositInvoice, User, Withdrawal, type IManualDepositInvoice } from '../models'
 import { clearState, getState, setState, type St } from '../services/state'
 import { getBroadcastCounts, countEligibleUsers, type IBroadcastUserFilter } from '../services/broadcast'
 import { enqueueBroadcastCampaign } from '../broadcast-queue'
@@ -265,7 +265,7 @@ ${bets}
 <b>بونوس ساخت حساب</b> تومان ${formatAmount(s.registrationBonus.IRT, 'IRT')} · تون (گرام) ${formatAmount(s.registrationBonus.TON, 'TON')}
 <b>حداقل زیرمجموعه برای برداشت</b> ${s.limits.minReferralsForWithdraw}
 <b>امکانات</b> دوئل ${s.features.duelsEnabled ? 'روشن' : 'خاموش'} · شارژ ${s.features.depositsEnabled ? 'روشن' : 'خاموش'} · برداشت ${s.features.withdrawalsEnabled ? 'روشن' : 'خاموش'} · چت ${s.features.chatEnabled ? 'روشن' : 'خاموش'}
-<b>عضویت اجباری</b> ${s.membership.enabled ? 'روشن' : 'خاموش'} · ${s.membership.channels.length} کانال
+<b>عضویت اجباری</b> ${s.membership.enabled ? 'روشن' : 'خاموش'} · ${s.membership.channels.length} کانال/گروه
 <b>دوئل شرطی:</b> مهلت انتخاب ${s.match.seconds}s · مهلت صف ${s.queue.seconds}s · سقف پیام هر نفر ${s.chat.maxMessages}
 <b>دوئل دوستانه:</b> مهلت انتخاب ${s.match.friendlySeconds}s · مهلت صف ${s.queue.friendlySeconds}s · سقف پیام هر نفر ${s.chat.friendlyMaxMessages}
 <b>جریمه کلمات ممنوع در دوئل شرطی</b> تومان ${formatAmount(s.chat.profanityPenalty.IRT, 'IRT')} · TON ${formatAmount(s.chat.profanityPenalty.TON, 'TON')} (۰ = فقط هشدار)
@@ -422,11 +422,13 @@ export async function updateAdminSettingFromInput(
 }
 
 async function adminStatsText(): Promise<string> {
-  const [users, active, queued, completed, house, ledgerRows, pendingPayments, pendingManualInvoices, pendingTonInvoices, pendingWithdrawals, balances, activeGroups] = await Promise.all([
+  const [users, active, queued, completed, groupCompleted, groupActive, house, ledgerRows, pendingPayments, pendingManualInvoices, pendingTonInvoices, pendingWithdrawals, balances, activeGroups] = await Promise.all([
     User.countDocuments({}),
     Match.countDocuments({ status: 'choosing' }),
     Ticket.countDocuments({ status: 'queued' }),
     Match.countDocuments({ status: 'settled' }),
+    GroupDuel.countDocuments({ status: 'settled' }),
+    GroupDuel.countDocuments({ status: { $in: ['pending', 'choosing', 'settling'] } }),
     House.findById('house').lean(),
     Ledger.aggregate([
       { $group: { _id: { currency: '$currency', type: '$type' }, available: { $sum: '$available' }, locked: { $sum: '$locked' } } },
@@ -448,7 +450,7 @@ async function adminStatsText(): Promise<string> {
 👥 کل کاربران: <b>${users.toLocaleString('en-US')}</b>
 👥 گروه‌های فعال: <b>${activeGroups.toLocaleString('en-US')}</b>
 ⚔️ دوئل‌های فعال: <b>${active}</b> · در انتظار حریف: <b>${queued}</b>
-🏁 دوئل‌های انجام‌شده: <b>${completed}</b>
+🏁 دوئل‌های انجام‌شدهٔ خصوصی: <b>${completed}</b>\n🏟 دوئل‌های گروهی: <b>${groupCompleted}</b> انجام‌شده · <b>${groupActive}</b> فعال
 
 <b>💰 تومان (IRT)</b>
 واریز تأییدشده: ${formatAmount(ledger('IRT', 'deposit'), 'IRT')}
@@ -479,27 +481,42 @@ async function adminStatsText(): Promise<string> {
 
 async function saveRequiredChannel(adminId: number, input: string): Promise<string> {
   const [rawId, rawUrl] = input.split('|').map((x) => x.trim())
-  if (!rawId) return '❌ شناسه کانال نامعتبر است.'
+  if (!rawId) return '❌ شناسه کانال یا گروه نامعتبر است.'
   const chatArg: string | number = /^-?\d+$/.test(rawId) ? Number(rawId) : (rawId.startsWith('@') ? rawId : `@${rawId}`)
   let chat: any
   try {
     chat = await bot.api.getChat(chatArg)
   } catch {
-    return '❌ کانال پیدا نشد یا ربات به آن دسترسی ندارد. ربات را به کانال اضافه کن و دوباره تلاش کن.'
+    return '❌ کانال/گروه پیدا نشد یا ربات به آن دسترسی ندارد. ابتدا ربات را به مقصد اضافه کن.'
   }
-  const chatId = String(chat.id)
+  const kind = String(chat.type ?? '')
+  if (!['channel', 'group', 'supergroup'].includes(kind)) return '❌ فقط کانال، گروه یا سوپرگروه قابل ثبت است.'
+  let me: any
+  let botMember: any
+  try {
+    me = await bot.api.getMe()
+    botMember = await bot.api.getChatMember(chat.id, me.id)
+  } catch {
+    return '❌ وضعیت دسترسی ربات قابل بررسی نیست. ربات را به مقصد اضافه کن و دوباره تلاش کن.'
+  }
+  if (!['administrator', 'creator'].includes(String(botMember.status))) {
+    return '❌ برای فعال‌سازی عضویت اجباری، ربات باید در همان کانال/گروه ادمین باشد.'
+  }
   const username = chat.username ? String(chat.username) : ''
   const url = rawUrl || (username ? `https://t.me/${username}` : '')
   if (!url || !/^https:\/\/t\.me\//i.test(url)) {
-    return '❌ برای کانال خصوصی باید لینک دعوت را هم بعد از | وارد کنی.'
+    return '❌ این مقصد خصوصی است؛ شناسه و لینک دعوت را با | وارد کن: <code>-1001234567890 | https://t.me/+InviteCode</code>'
   }
+  if (!username && !rawUrl) return '❌ برای مقصد خصوصی باید لینک دعوت اختصاصی وارد شود.'
   const cfg = await getSettings()
-  if (cfg.membership.channels.some((x) => x.chatId === chatId)) return 'این کانال از قبل اضافه شده است.'
-  const title = String(chat.title ?? chat.first_name ?? username ?? chatId)
-  await updateSettings('membership.channels', [...cfg.membership.channels, { chatId, title, url }])
+  if (cfg.membership.channels.some((x) => x.chatId === String(chat.id))) return 'این مقصد از قبل اضافه شده است.'
+  const title = String(chat.title ?? username ?? chat.id)
+  const targets = [...cfg.membership.channels, { chatId: String(chat.id), title, url, kind: kind as 'channel' | 'group' | 'supergroup' }]
+  await updateSettings('membership.channels', targets)
   await updateSettings('membership.enabled', true)
-  await log(adminId, 'required_channel_add', `${chatId}|${title}`)
-  return `✅ کانال <b>${title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</b> اضافه شد. اگر بررسی عضویت کار نکرد، ربات را در کانال ادمین کن.`
+  await log(adminId, 'required_membership_target_add', `${kind}|${chat.id}|${title}`)
+  const safeTitle = title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return `✅ ${kind === 'channel' ? 'کانال' : 'گروه'} <b>${safeTitle}</b> اضافه شد. ربات به‌عنوان ادمین ثبت شد.`
 }
 
 const htmlEscape = (value: unknown): string => String(value ?? '')
@@ -1181,7 +1198,7 @@ export function registerAdmin(): void {
       return
     }
     const cfg = await getSettings()
-    const channelText = `<b>📢 مدیریت عضویت اجباری</b>\nوضعیت: ${cfg.membership.enabled ? '✅ روشن' : '⛔ خاموش'}\nتعداد کانال‌ها: ${cfg.membership.channels.length}\n\nبرای کانال خصوصی، شناسه کانال و لینک دعوت را با | جدا کن؛ نمونه:\n<code>-1001234567890 | https://t.me/+InviteCode</code>\nبرای کانال عمومی فقط <code>@channel</code> را بفرست.\n\nربات باید در کانال دسترسی لازم برای بررسی عضویت را داشته باشد.`
+    const channelText = `<b>🔐 مدیریت عضویت اجباری گروه و کانال</b>\nوضعیت: ${cfg.membership.enabled ? '✅ روشن' : '⛔ خاموش'}\nتعداد مقصدها: ${cfg.membership.channels.length}\n\n<b>۱) گروه یا کانال عمومی</b>\nربات را به مقصد اضافه و ادمین کن؛ سپس فقط شناسهٔ عمومی مانند <code>@my_channel</code> یا <code>@my_group</code> را بفرست. لینک عمومی به‌صورت خودکار ساخته می‌شود.\n\n<b>۲) گروه یا کانال خصوصی</b>\nابتدا ربات را به مقصد خصوصی اضافه و ادمین کن. سپس شناسهٔ عددی مقصد که معمولاً با <code>-100</code> شروع می‌شود و لینک دعوت را با | جدا کن؛ نمونه:\n<code>-1001234567890 | https://t.me/+InviteCode</code>\nبرای به‌دست‌آوردن شناسهٔ خصوصی می‌توانی از یک ربات نمایش شناسهٔ چت در همان گروه یا از پیام فورواردشدهٔ آن مقصد استفاده کنی. لینک دعوت باید معتبر و فعال باشد.\n\n<b>نکتهٔ مهم:</b> ربات باید در هر مقصد ادمین باشد تا بتواند عضویت کاربران را از Telegram دریافت و بررسی کند. کاربران عادی و مدیران ربات باید عضو تمام مقصدهای ثبت‌شده باشند؛ فقط مالک اصلی ربات از این محدودیت مستثناست. وضعیت عضویت در هر تعامل دوباره از تلگرام بررسی می‌شود.`
     const text = action === 'settings'
       ? `${await summary()}\n\nبرای تغییر هر مورد روی دکمه مربوط به آن بزن:`
       : action === 'stats'
@@ -1227,7 +1244,7 @@ export function registerAdmin(): void {
     await ctx.answerCallbackQuery().catch(() => {})
     if (!isAdmin(ctx)) return
     await setState(ctx.from.id, { s: 'admin_channel_add' })
-    await ctx.reply('➕ شناسه کانال عمومی را به شکل <code>@channel</code> بفرست. برای کانال خصوصی بنویس: <code>-1001234567890 | https://t.me/+InviteCode</code>\nبرای لغو: /cancel', { parse_mode: 'HTML' })
+    await ctx.reply('➕ مقصد عمومی: <code>@username</code>\nمقصد خصوصی: <code>-1001234567890 | https://t.me/+InviteCode</code>\nابتدا ربات را به مقصد اضافه و ادمین کن. برای بررسی عضویت کاربران، ربات باید در تمام مقصدها ادمین باقی بماند.\nبرای لغو: /cancel', { parse_mode: 'HTML' })
   })
 
   bot.callbackQuery(/^admch:del:(\d+)$/, async (ctx) => {
@@ -1242,7 +1259,7 @@ export function registerAdmin(): void {
     const channels = cfg.membership.channels.filter((_, i) => i !== index)
     await updateSettings('membership.channels', channels)
     await log(ctx.from.id, 'required_channel_delete', cfg.membership.channels[index]!.chatId)
-    const text = `<b>📢 مدیریت عضویت اجباری</b>\nکانال حذف شد. تعداد کانال‌ها: ${channels.length}`
+    const text = `<b>📢 مدیریت عضویت اجباری</b>\nمقصد حذف شد. تعداد کانال/گروه‌ها: ${channels.length}`
     await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: adminChannelsKeyboard(channels) }).catch(async () => {
       await ctx.reply(text, { parse_mode: 'HTML', reply_markup: adminChannelsKeyboard(channels) })
     })

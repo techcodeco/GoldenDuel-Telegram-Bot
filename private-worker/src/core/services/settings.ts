@@ -20,7 +20,7 @@ export interface Settings {
   referral: { rewardIRT: number; reward: Record<Currency, number>; maxPaidReferrals: number }
   registrationBonus: Record<Currency, number>
   features: { duelsEnabled: boolean; depositsEnabled: boolean; withdrawalsEnabled: boolean; chatEnabled: boolean }
-  membership: { enabled: boolean; channels: Array<{ chatId: string; title: string; url: string }> }
+  membership: { enabled: boolean; channels: Array<{ chatId: string; title: string; url: string; kind?: 'channel' | 'group' | 'supergroup' }> }
   manualDeposit: {
     cardNumber: string
     cardHolder: string

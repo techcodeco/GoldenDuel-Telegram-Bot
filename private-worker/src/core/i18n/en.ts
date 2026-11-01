@@ -16,6 +16,7 @@ export const en = {
   'btn.deposit': '🟩 ➕ Top up',
   'btn.finance': '🏦 Finance',
   'btn.language': '🌐 Language',
+  'btn.add_group': '🟩 ➕ Add bot to a group',
   'btn.profile': '👤 Profile',
   'btn.admin': '🟩 🛠 Admin',
   'btn.withdraw': '🟥 💸 Withdraw',
@@ -51,6 +52,12 @@ export const en = {
   'duel.invalid': '⚠️ This bet is not available any more. Please choose again.',
   'duel.searching': '🔎 Searching for an opponent with the same bet (<b>{amount} {cur}</b>)…\nYour stake is reserved and will be returned if nobody is found within <b>{duration}</b>.',
     'duel.cancelled': '✅ Search cancelled. Your stake was returned.',
+  'duel.cancelled_bet': '✅ Search cancelled. Your stake has been returned to your balance.',
+  'duel.cancelled_friendly': '✅ Search cancelled.',
+  'duel.rematch_button': '🔁 Rematch',
+  'duel.rematch_search_started': '🔎 Rematch search started.',
+  'duel.rematch_started': '✅ Rematch started.',
+  'duel.rematch_already_started': 'This rematch request has already been started or is being processed.',
   'duel.cancel_late': 'An opponent was just found — the duel can no longer be cancelled.',
   'duel.no_opponent': '😕 No opponent was found within <b>{duration}</b>. Your stake of {amount} {cur} was returned.',
   'duel.matched': '⚔️ <b>Opponent found!</b>\nBet: <b>{amount} {cur}</b>\nYou have <b>{duration}</b> to chat with your opponent and pick your move. Anything you type here is sent to them.\n\nPick your move:',
@@ -58,8 +65,8 @@ export const en = {
 We are waiting for the opponent to choose. Good luck 🍀`,
   'duel.chosen_settled': `✅ <b>Your move was registered successfully!</b>
 Both players have locked in their moves; the result is shown in a separate message. 🎯`,
-  'duel.opponent_chosen': `⚡ Your opponent has already chosen!
-Choose your move now. ⏳ {seconds} seconds left.`,
+  'duel.opponent_chosen': `⚡ <b>{name}</b> has registered their move!
+Choose your move now. ⏳ Only <b>{seconds} seconds</b> remain.`,
   'duel.reminder': `⏰ <b>Time is running out!</b>
 Only <b>{seconds} seconds</b> remain. Tap Rock, Paper or Scissors now!`,
   'duel.matched_friendly': `🤝 <b>Friendly opponent found!</b>\nNo bet and no fees — just play for fun.\nYou have <b>{duration}</b> to chat and choose your move.\n\nMake your choice:`,
@@ -234,9 +241,9 @@ Use the buttons below to inspect statistics and manage all game parameters. Chan
 
   'support.info': '🆘 <b>Support</b>\nFor help, contact the bot administrator.',
   'registration.bonus': '🎁 Your account creation bonus: <b>+{amount} {cur}</b> has been credited to your balance.',
-  'membership.required': '🔐 <b>Required channel membership</b>\nPlease join every channel below, then tap “Check membership” to continue using the bot.',
-  'membership.unavailable': '⚠️ Membership could not be verified. The administrator may need to add this bot as an administrator in the listed channels.',
-  'membership.not_member': '❌ You are still not a member of all required channels. Join them and try again.',
+  'membership.required': '🔐 <b>Required group and channel membership</b>\nJoin every group and channel listed below, then tap “Check membership” to continue using the bot.',
+  'membership.unavailable': '⚠️ Membership could not be verified. The administrator must make this bot an administrator in every listed group and channel.',
+  'membership.not_member': '❌ You are not yet a member of every required group and channel. Join all destinations below and check again.',
   'membership.verified': '✅ Membership verified. You can use the bot now.',
   'error.generic': '⚠️ Something went wrong. Please try again.',
 } as const

@@ -1,31 +1,25 @@
 import { InlineKeyboard } from "grammy";
-import { bot, tr, curLabel, fmt, mention } from "../runtime";
+import { bot, tr, curLabel, fmt, mention, getUser, langOf } from "../runtime";
 import { GroupConfig, GroupDuel } from "../models/index";
-import { getUser } from "../runtime";
-import { langOf } from "../runtime";
+import {
+  deleteEphemeralMessage,
+  editEphemeralMessage,
+  sendEphemeralMessage,
+} from "../bot/ephemeral";
 
 function formatDuration(seconds: number, lang: "fa" | "en"): string {
   const total = Math.max(1, Math.floor(seconds));
   const minutes = Math.floor(total / 60);
   const remainingSeconds = total % 60;
-
   if (lang === "fa") {
     if (minutes === 0) return `${total} ثانیه`;
     if (remainingSeconds === 0) return `${minutes} دقیقه`;
     return `${minutes} دقیقه و ${remainingSeconds} ثانیه`;
   }
-
-  if (minutes === 0) {
-    return `${total} ${total === 1 ? "second" : "seconds"}`;
-  }
-
-  if (remainingSeconds === 0) {
+  if (minutes === 0) return `${total} ${total === 1 ? "second" : "seconds"}`;
+  if (remainingSeconds === 0)
     return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
-  }
-
-  return `${minutes} ${minutes === 1 ? "minute" : "minutes"} and ${remainingSeconds} ${
-    remainingSeconds === 1 ? "second" : "seconds"
-  }`;
+  return `${minutes} ${minutes === 1 ? "minute" : "minutes"} and ${remainingSeconds} ${remainingSeconds === 1 ? "second" : "seconds"}`;
 }
 
 export function gameKeyboard(id: string, lang: "fa" | "en") {
@@ -39,19 +33,14 @@ export function gameKeyboard(id: string, lang: "fa" | "en") {
 }
 
 export async function gameProgressText(duel: any) {
-  const cfg = (await GroupConfig.findOne({
-    chatId: String(duel.chatId),
-  })
+  const cfg = (await GroupConfig.findOne({ chatId: String(duel.chatId) })
     .select("language betTimeoutSeconds friendlyTimeoutSeconds")
     .lean()) as any;
-
   const lang = langOf(cfg?.language);
-
   const [u1, u2] = await Promise.all([
     getUser(Number(duel.initiatorId)),
     getUser(Number(duel.opponentId)),
   ]);
-
   const p1 = mention(
     {
       id: duel.initiatorId,
@@ -61,7 +50,6 @@ export async function gameProgressText(duel: any) {
     },
     lang,
   );
-
   const p2 = mention(
     {
       id: duel.opponentId,
@@ -71,76 +59,32 @@ export async function gameProgressText(duel: any) {
     },
     lang,
   );
-
   const isBet = duel.mode === "bet";
-
   const mode = isBet
     ? tr(lang, "شرطی", "bet")
     : tr(lang, "دوستانه", "friendly");
-
   const configuredTimeout = Number(
     isBet ? cfg?.betTimeoutSeconds : cfg?.friendlyTimeoutSeconds,
   );
-
   const durationSeconds = Math.max(30, Math.min(600, configuredTimeout || 180));
-
   const durationText = formatDuration(durationSeconds, lang);
-
-  const chosen = duel.p1Choice ? p1 : duel.p2Choice ? p2 : null;
-
-  const progress = chosen
-    ? tr(
-        lang,
-        `${chosen} انتخاب خود را ثبت کرده است. منتظر انتخاب حریف می‌مانیم.`,
-        `${chosen} has made their choice. Waiting for the opponent.`,
-      )
-    : tr(
-        lang,
-        "هر بازیکن یک گزینه را انتخاب کند.",
-        "Each player should make one choice.",
-      );
-
-  const stakeLineFa = isBet
-    ? `\n💰 مبلغ هر بازیکن: <b>${fmt(
-        Number(duel.amount),
-        String(duel.currency),
-      )} ${curLabel(String(duel.currency), lang)}</b>`
+  const stakeFa = isBet
+    ? `\n💰 مبلغ هر بازیکن: <b>${fmt(Number(duel.amount), String(duel.currency))} ${curLabel(String(duel.currency), lang)}</b>`
     : "\n🆓 بدون شرط مالی";
-
-  const stakeLineEn = isBet
-    ? `\n💰 Stake per player: <b>${fmt(
-        Number(duel.amount),
-        String(duel.currency),
-      )} ${curLabel(String(duel.currency), lang)}</b>`
+  const stakeEn = isBet
+    ? `\n💰 Stake per player: <b>${fmt(Number(duel.amount), String(duel.currency))} ${curLabel(String(duel.currency), lang)}</b>`
     : "\n🆓 No stake";
-
-  const durationLineFa = `\n⏱️ مدت زمان انتخاب: <b>${durationText}</b>`;
-  const durationLineEn = `\n⏱️ Choice time limit: <b>${durationText}</b>`;
-
+  const durationFa = `\n⏱️ مهلت انتخاب: <b>${durationText}</b>`;
+  const durationEn = `\n⏱️ Choice time limit: <b>${durationText}</b>`;
   return tr(
     lang,
-    [
-      `⚔️ <b>رقابت ${mode}</b>`,
-      `👤 ${p1}`,
-      `👤 ${p2}${stakeLineFa}`,
-      durationLineFa,
-      "",
-      progress,
-    ].join("\n"),
-    [
-      `⚔️ <b>${mode} duel</b>`,
-      `👤 ${p1}`,
-      `👤 ${p2}${stakeLineEn}`,
-      durationLineEn,
-      "",
-      progress,
-    ].join("\n"),
+    `⚔️ <b>رقابت ${mode}</b>\n👤 ${p1}\n👤 ${p2}${stakeFa}${durationFa}\n\nهر بازیکن فقط یک بار می‌تواند سنگ، کاغذ یا قیچی را انتخاب کند.`,
+    `⚔️ <b>${mode} duel</b>\n👤 ${p1}\n👤 ${p2}${stakeEn}${durationEn}\n\nEach player can choose rock, paper, or scissors exactly once.`,
   );
 }
 
-export async function refreshGameProgress(duel: any) {
-  if (!duel?.gameMessageId) return;
-  const text = await gameProgressText(duel);
+/** Creates one independent private-in-group move form for each participant. */
+export async function sendPlayerGameForms(duel: any): Promise<void> {
   const lang = langOf(
     (
       (await GroupConfig.findOne({ chatId: String(duel.chatId) })
@@ -148,26 +92,235 @@ export async function refreshGameProgress(duel: any) {
         .lean()) as any
     )?.language,
   );
-  await bot.api
-    .editMessageText(Number(duel.chatId), Number(duel.gameMessageId), text, {
-      parse_mode: "HTML",
-      reply_markup: gameKeyboard(String(duel._id), lang),
-    })
-    .catch(() => undefined);
+  const text = await gameProgressText(duel);
+  const markup = {
+    inline_keyboard: gameKeyboard(String(duel._id), lang).inline_keyboard,
+  };
+  let first: any;
+  let second: any;
+  try {
+    first = await sendEphemeralMessage(
+      Number(duel.chatId),
+      Number(duel.initiatorId),
+      text,
+      {
+        parse_mode: "HTML",
+        reply_markup: markup,
+      },
+    );
+    const firstStored = await GroupDuel.updateOne(
+      {
+        _id: String(duel._id),
+        status: "choosing",
+        gameFormsSent: { $ne: true },
+      },
+      {
+        $set: { initiatorGameEphemeralId: Number(first.ephemeral_message_id) },
+      },
+    );
+    if (!firstStored.modifiedCount)
+      throw new Error("GROUP_INITIATOR_GAME_FORM_STATE_CHANGED");
+
+    second = await sendEphemeralMessage(
+      Number(duel.chatId),
+      Number(duel.opponentId),
+      text,
+      {
+        parse_mode: "HTML",
+        reply_markup: markup,
+      },
+    );
+    const stored = await GroupDuel.updateOne(
+      {
+        _id: String(duel._id),
+        status: "choosing",
+        gameFormsSent: { $ne: true },
+        initiatorGameEphemeralId: Number(first.ephemeral_message_id),
+      },
+      {
+        $set: {
+          opponentGameEphemeralId: Number(second.ephemeral_message_id),
+          gameFormsSent: true,
+        },
+      },
+    );
+    if (!stored.modifiedCount) throw new Error("GROUP_GAME_FORM_STATE_CHANGED");
+    const latest = (await GroupDuel.findById(String(duel._id)).lean()) as any;
+    if (latest?.status === "choosing") {
+      if (latest.p1Choice && !latest.p2Choice)
+        await notifyOpponentChoice(latest, Number(latest.initiatorId));
+      else if (latest.p2Choice && !latest.p1Choice)
+        await notifyOpponentChoice(latest, Number(latest.opponentId));
+    }
+  } catch (error) {
+    if (first?.ephemeral_message_id)
+      await deleteEphemeralMessage(
+        Number(duel.chatId),
+        Number(duel.initiatorId),
+        Number(first.ephemeral_message_id),
+      ).catch(() => undefined);
+    // A late database failure can happen after both private cards were delivered.
+    if (second?.ephemeral_message_id)
+      await deleteEphemeralMessage(
+        Number(duel.chatId),
+        Number(duel.opponentId),
+        Number(second.ephemeral_message_id),
+      ).catch(() => undefined);
+    throw error;
+  }
 }
 
+/** Edit the opponent's existing private move form; never send a second reminder message here. */
+export async function notifyOpponentChoice(
+  duel: any,
+  chooserId: number,
+): Promise<void> {
+  const initiatorId = Number(duel.initiatorId);
+  const opponentId = Number(duel.opponentId);
+  const opponentUserId =
+    chooserId === initiatorId
+      ? opponentId
+      : chooserId === opponentId
+        ? initiatorId
+        : 0;
+  if (!opponentUserId) return;
+  const opponentAlreadyChose =
+    chooserId === initiatorId ? Boolean(duel.p2Choice) : Boolean(duel.p1Choice);
+  if (opponentAlreadyChose) return;
+  const messageId = Number(
+    opponentUserId === initiatorId
+      ? duel.initiatorGameEphemeralId
+      : duel.opponentGameEphemeralId,
+  );
+  if (!messageId) return;
+
+  const cfg = (await GroupConfig.findOne({ chatId: String(duel.chatId) })
+    .select("language")
+    .lean()) as any;
+  const lang = langOf(cfg?.language);
+  const [chooser] = await Promise.all([getUser(chooserId)]);
+  const chooserMention = mention(
+    {
+      id: chooserId,
+      first_name: chooser?.firstName,
+      last_name: chooser?.lastName,
+      username: chooser?.username,
+    },
+    lang,
+  );
+  const secondsLeft = Math.max(
+    0,
+    Math.ceil((Number(duel.deadline) - Date.now()) / 1000),
+  );
+  const base = await gameProgressText(duel);
+  const text = tr(
+    lang,
+    `${base}\n\n✅ ${chooserMention} انتخاب خودش را ثبت کرده است.\n⏳ شما <b>${secondsLeft} ثانیه</b> برای انتخاب فرصت دارید.`,
+    `${base}\n\n✅ ${chooserMention} has registered their choice.\n⏳ You have <b>${secondsLeft} seconds</b> left to choose.`,
+  );
+  try {
+    await editEphemeralMessage(
+      Number(duel.chatId),
+      opponentUserId,
+      messageId,
+      text,
+      {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: gameKeyboard(String(duel._id), lang).inline_keyboard,
+        },
+      },
+    );
+  } catch {
+    // Do not create another message: the existing private form is the only actionable prompt.
+  }
+}
+
+export async function acknowledgePlayerChoice(
+  duel: any,
+  userId: number,
+): Promise<void> {
+  const lang = langOf(
+    (
+      (await GroupConfig.findOne({ chatId: String(duel.chatId) })
+        .select("language")
+        .lean()) as any
+    )?.language,
+  );
+  const isP1 = userId === Number(duel.initiatorId);
+  const messageId = Number(
+    isP1 ? duel.initiatorGameEphemeralId : duel.opponentGameEphemeralId,
+  );
+  if (!messageId) return;
+  const [u1, u2] = await Promise.all([
+    getUser(Number(duel.initiatorId)),
+    getUser(Number(duel.opponentId)),
+  ]);
+  const p1 = mention(
+    {
+      id: duel.initiatorId,
+      first_name: u1?.firstName,
+      last_name: u1?.lastName,
+      username: u1?.username,
+    },
+    lang,
+  );
+  const p2 = mention(
+    {
+      id: duel.opponentId,
+      first_name: u2?.firstName,
+      last_name: u2?.lastName,
+      username: u2?.username,
+    },
+    lang,
+  );
+  const text = tr(
+    lang,
+    `✅ <b>انتخاب تو ثبت شد.</b>\n${p1} و ${p2}\n\n⌛ منتظر انتخاب حریف بمان.`,
+    `✅ <b>Your choice has been recorded.</b>\n${p1} and ${p2}\n\n⌛ Waiting for your opponent to choose.`,
+  );
+  try {
+    await editEphemeralMessage(Number(duel.chatId), userId, messageId, text, {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: [] },
+    });
+  } catch {
+    // Remove the form if editing fails so its old move buttons are no longer visible.
+    await deleteEphemeralMessage(Number(duel.chatId), userId, messageId).catch(
+      () => undefined,
+    );
+  }
+}
+
+export async function deleteDuelEphemeralCards(duel: any): Promise<void> {
+  const chatId = Number(duel.chatId);
+  const items: Array<[number, unknown]> = [
+    [Number(duel.initiatorId), duel.initiatorWaitEphemeralId],
+    [Number(duel.opponentId), duel.opponentInviteEphemeralId],
+    [Number(duel.initiatorId), duel.initiatorGameEphemeralId],
+    [Number(duel.opponentId), duel.opponentGameEphemeralId],
+    [Number(duel.initiatorId), duel.initiatorRematchEphemeralId],
+    [Number(duel.opponentId), duel.opponentRematchEphemeralId],
+  ];
+  await Promise.all(
+    items
+      .filter(([, id]) => Number(id) > 0)
+      .map(([uid, id]) =>
+        deleteEphemeralMessage(chatId, uid, Number(id)).catch(() => undefined),
+      ),
+  );
+}
+
+/** Legacy message cleanup, retained to handle duels created before the private-form rollout. */
 export async function disableGameMessage(
   duel: any,
   _langOverride?: "fa" | "en",
 ) {
+  await deleteDuelEphemeralCards(duel);
   if (!duel?.gameMessageId) return;
-  // Keep the original game prompt intact; only remove the now-inactive move buttons.
-  // The result is posted as a reply, without adding a redundant end-of-duel message.
   await bot.api
     .editMessageReplyMarkup(Number(duel.chatId), Number(duel.gameMessageId), {
-      reply_markup: {
-        inline_keyboard: [],
-      },
+      reply_markup: { inline_keyboard: [] },
     })
     .catch(() => undefined);
 }
@@ -182,12 +335,31 @@ export async function replyToGameMessage(duel: any, text: string) {
 }
 
 export async function closeInviteKeyboard(duel: any) {
-  if (!duel?.inviteMessageId) return;
-  await bot.api
-    .editMessageReplyMarkup(Number(duel.chatId), Number(duel.inviteMessageId), {
-      reply_markup: {
-        inline_keyboard: [],
-      },
-    })
-    .catch(() => undefined);
+  await Promise.all([
+    Number(duel?.opponentInviteEphemeralId) > 0
+      ? deleteEphemeralMessage(
+          Number(duel.chatId),
+          Number(duel.opponentId),
+          Number(duel.opponentInviteEphemeralId),
+        ).catch(() => undefined)
+      : Promise.resolve(),
+    Number(duel?.initiatorWaitEphemeralId) > 0
+      ? deleteEphemeralMessage(
+          Number(duel.chatId),
+          Number(duel.initiatorId),
+          Number(duel.initiatorWaitEphemeralId),
+        ).catch(() => undefined)
+      : Promise.resolve(),
+  ]);
+  if (duel?.inviteMessageId) {
+    await bot.api
+      .editMessageReplyMarkup(
+        Number(duel.chatId),
+        Number(duel.inviteMessageId),
+        {
+          reply_markup: { inline_keyboard: [] },
+        },
+      )
+      .catch(() => undefined);
+  }
 }

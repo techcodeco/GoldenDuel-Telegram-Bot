@@ -123,15 +123,19 @@ export async function groupLang(chatId: string): Promise<'fa' | 'en'> {
   return langOf(c?.language)
 }
 
-export async function sendHelp(chatId: number | string, lang: 'fa' | 'en', replyToMessageId?: number) {
+export async function sendHelp(chatId: number | string, lang: 'fa' | 'en', receiverUserId: number, replyToMessageId?: number) {
   const text = tr(lang,
-    '⚔️ <b>راهنمای دوئل گروهی</b>\nبرای دعوت، روی پیام حریف ریپلای کن و دقیقاً یکی از واژه‌های «دوئل»، «فایت» یا «رقابت» را بفرست.\nبعد از انتخاب نوع رقابت، برای بازی شرطی فرم ارز و مبلغ نمایش داده می‌شود؛ رقابت دوستانه بدون شرط مالی است.\nبرای تنظیمات گروه، «پنل» را بفرست.',
-    '⚔️ <b>Group duel guide</b>\nTo challenge someone, reply to their message and send exactly “duel”, “fight”, or “competition”.\nAfter choosing the mode, currency and stake are requested only for bet duels; friendly duels have no stake.\nSend “panel” to manage this group.',
+    '⚔️ <b>راهنمای کامل دوئل گروهی</b>\n\n<b>۱) ارسال دعوت</b>\nروی پیام کاربر موردنظر ریپلای کن و یکی از واژه‌های «دوئل»، «فایت»، «رقابت»، «duel»، «fight» یا «competition» را بفرست. هر دو بازیکن باید قبلاً ربات را در پیوی Start کرده باشند.\n\n<b>۲) تنظیم رقابت</b>\nفرم تنظیمات فقط برای دعوت‌کننده و به‌صورت خصوصی داخل گروه نمایش داده می‌شود. نوع «دوستانه» بدون پول و شرط است. نوع «شرطی» از تو ارز (تومان یا TON) و مبلغ هر بازیکن را می‌پرسد. دکمهٔ بازگشت برای اصلاح انتخاب قبلی وجود دارد.\n\n<b>۳) تأیید حریف</b>\nپس از تنظیم، دعوت خصوصی برای حریف فرستاده می‌شود و دعوت‌کننده کارت انتظار و دکمهٔ لغو دارد. حریف می‌تواند دعوت را قبول یا رد کند؛ دعوت در صورت بی‌پاسخ ماندن پس از پایان مهلت منقضی می‌شود. در دوئل شرطی، مبلغ هر دو نفر هنگام شروع بازی رزرو می‌شود.\n\n<b>۴) انتخاب سنگ، کاغذ یا قیچی</b>\nپس از پذیرش، هر بازیکن فرم اختصاصی خودش را می‌بیند. هر نفر فقط یک بار می‌تواند انتخاب کند. ثبت انتخاب یک نفر، دکمه‌های همان نفر را می‌بندد و فرم حریف را فعال نگه می‌دارد. مهلت انتخاب مطابق تنظیمات گروه است.\n\n<b>۵) یادآوری و پایان</b>\nدر ۸۵٪ زمان، فقط به بازیکنانی که هنوز انتخاب نکرده‌اند یادآوری خصوصی با زمان باقی‌مانده ارسال می‌شود. با تکمیل انتخاب‌ها یا پایان مهلت، نتیجهٔ نهایی در گروه منتشر می‌شود. کنترل شروع دوباره برای هر بازیکن خصوصی است و پیام عمومی دکمهٔ قابل‌استفاده برای دیگران ندارد.\n\n<b>۶) تنظیمات</b>\nبرای مدیریت زبان، حالت‌های مجاز، ارزها و مهلت دعوت/انتخاب، واژهٔ «پنل» را بفرست. فقط فعال‌کنندهٔ گروه می‌تواند پنل را مدیریت کند.',
+    '⚔️ <b>Complete group duel guide</b>\n\n<b>1) Send a challenge</b>\nReply to the target user’s message and send “duel”, “fight”, “competition”, or the Persian trigger words «دوئل»، «فایت»، «رقابت». Both players must have started the bot in private first.\n\n<b>2) Configure the duel</b>\nOnly the challenger sees the setup form, privately inside the group. Friendly mode has no money or stake. Bet mode asks for a currency (Toman or TON) and the stake per player. Back buttons let you revise the previous step.\n\n<b>3) Opponent invitation</b>\nThe opponent receives a private invitation; the challenger gets a private waiting card with a Cancel button. The opponent can accept or reject. An unanswered invitation expires after its configured deadline. For bet duels, both stakes are reserved when the duel starts.\n\n<b>4) Rock, paper, or scissors</b>\nAfter acceptance, each player receives their own private move form. Each player can choose exactly once. Once a move is registered, that player’s buttons are disabled while the opponent’s form remains active. The choice deadline follows this group’s settings.\n\n<b>5) Reminder and result</b>\nAt 85% of the choice window, only players who have not chosen receive a private reminder showing the remaining seconds. When both moves are recorded or the deadline expires, one final result is published in the group. The public result has one visible text message; each player receives only a recipient-specific rematch button anchored under that result.\n\n<b>6) Settings</b>\nSend “panel” to manage language, allowed modes, currencies, invitation deadlines, and move deadlines. Only the group activator can manage this panel.',
   )
-  await bot.api.sendMessage(chatId, text, {
-    parse_mode: 'HTML',
-    ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId } } : {}),
-  } as any)
+  try {
+    await sendEphemeralMessage(chatId, receiverUserId, text, { parse_mode: 'HTML' }, {
+      ...(replyToMessageId ? { replyMessageId: replyToMessageId } : {}),
+    })
+  } finally {
+    // The trigger is only a command; keep the guide private to the person who asked.
+    if (replyToMessageId) await bot.api.deleteMessage(chatId, replyToMessageId).catch(() => undefined)
+  }
 }
 
 function modeText(cfg: any, lang: 'fa' | 'en') {
@@ -281,16 +285,7 @@ export async function sendDashboard(chatId: string, actorId: number, cfg: any, r
     }, { ...(replyToMessageId ? { replyMessageId: replyToMessageId } : {}) })
   } catch (error: any) {
     logError('ephemeral_dashboard_send_failed', error, { chatId, actorId, replyToMessageId })
-    // Avoid a second known-to-fail call when Telegram returns 404 (usually an
-    // invalid BOT_TOKEN or wrong Bot API endpoint). Never fall back to public
-    // dashboard content; the fallback message is generic only.
-    const errorCode = Number(error?.error_code ?? error?.errorCode ?? error?.parameters?.error_code)
-    if (errorCode !== 404 && !/\(404:\s*Not Found\)/i.test(String(error?.message ?? ''))) {
-      await bot.api.sendMessage(Number(chatId), tr(lang,
-        '⚠️ پنل خصوصی داخل گروه ارسال نشد. دسترسی ادمین گروه را به ربات بده و مطمئن شو Bot API و برنامهٔ تلگرام از پیام‌های خصوصی داخل گروه پشتیبانی می‌کنند.',
-        '⚠️ The private in-group dashboard could not be sent. Make the bot a group administrator and ensure the Telegram API/client supports ephemeral group messages.',
-      ), { ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId } } : {}) } as any).catch((fallbackError) => logError('dashboard_failure_notice_send_failed', fallbackError, { chatId, actorId }))
-    }
+    // Fail closed: never replace a private dashboard with a public message.
     throw error
   }
 }

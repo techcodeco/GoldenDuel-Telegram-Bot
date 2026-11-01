@@ -26,6 +26,7 @@ export const BUTTON_KEYS = [
   'btn.deposit',
   'btn.finance',
   'btn.language',
+  'btn.add_group',
   'btn.profile',
   'btn.admin',
   'btn.withdraw',

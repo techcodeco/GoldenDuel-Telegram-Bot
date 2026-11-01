@@ -33,7 +33,7 @@ const styleInline = <T extends { inline_keyboard?: any[][] }>(keyboard: T): T =>
         delete button.style
         continue
       }
-      button.style = /cancel|reject|:no(?:$|:)|withdraw|delete|remove|bc:cancel|dq:x:|لغو|برداشت/.test(key) ? 'danger'
+      button.style = /cancel|reject|:no(?:$|:)|withdraw|delete|remove|bc:cancel|dq:x:|dq:back|لغو|برداشت/.test(key) ? 'danger'
         : /deposit|:yes|confirm|approve|bc:confirm|save|:amt:|admin:backups|admin:broadcast|backup management|مدیریت بکاپ|مدیریت ربات/.test(key) ? 'success'
           : 'primary'
     }
@@ -46,6 +46,7 @@ export const mainKeyboard = (lang: Lang, isAdmin = false) => {
   const keyboard: StyledButton[][] = [
     [styled(t(lang, 'btn.duel'), 'primary')],
     [styled(t(lang, 'btn.balance')), plain(t(lang, 'btn.friendly'))],
+    [styled(t(lang, 'btn.add_group'), 'success')],
     [styled(t(lang, 'btn.profile'))],
     [styled(t(lang, 'btn.withdraw'), 'danger'), styled(t(lang, 'btn.deposit'), 'success')],
     [styled(t(lang, 'btn.finance_history')), plain(t(lang, 'btn.duel_history'))],
@@ -86,8 +87,11 @@ export const balanceActionsKeyboard = (lang: Lang) => ({
 /** Legacy export kept for old callbacks, but the main duel flow no longer asks for a mode. */
 export const duelModeKeyboard = (lang: Lang) => ({
   inline_keyboard: [
-    [{ text: t(lang, 'duel.mode_bet'), callback_data: 'dm:bet', style: 'primary' }],
-    [{ text: t(lang, 'duel.mode_friendly'), callback_data: 'dm:friendly' }],
+    [
+      { text: t(lang, 'duel.mode_bet'), callback_data: 'dm:bet', style: 'primary' },
+      { text: t(lang, 'duel.mode_friendly'), callback_data: 'dm:friendly' },
+    ],
+    [{ text: t(lang, 'btn.back'), callback_data: 'dm:back' }],
   ],
 }) as any
 
@@ -98,6 +102,8 @@ export const amountKeyboard = (lang: Lang, cur: Currency, amounts: number[], wai
     kb.text(`${formatAmount(a, cur)} ${curName(lang, cur)}${waitingMark}`, `dq:a:${cur}:${a}`)
     if (i % 2 === 1) kb.row()
   })
+  if (kb.inline_keyboard[kb.inline_keyboard.length - 1]?.length) kb.row()
+  kb.text(lang === 'fa' ? '⬅️ بازگشت به انتخاب ارز' : '⬅️ Back to currency', 'dq:back')
   return styleInline(kb)
 }
 
@@ -198,7 +204,7 @@ export const adminSettingsKeyboard = (s: Settings) =>
     .text(`چت حریفان: ${onOff(s.features.chatEnabled)}`, 'at:chat')
     .row()
     .text(`عضویت اجباری: ${onOff(s.membership.enabled)}`, 'at:membership')
-    .text('📢 مدیریت کانال‌ها', 'admin:channels')
+    .text('🔐 مدیریت گروه‌ها و کانال‌ها', 'admin:channels')
     .row()
     .text(`شرطی | زمان انتخاب: ${sec(s.match.seconds)}`, 'as:bms')
     .row()
@@ -257,17 +263,17 @@ export const adminSettingsKeyboard = (s: Settings) =>
     .row()
     .text('⬅️ بازگشت به مدیریت', 'admin:home'))
 
-export const membershipKeyboard = (channels: Array<{ title: string; url: string }>, lang: Lang) => {
+export const membershipKeyboard = (channels: Array<{ title: string; url: string; kind?: 'channel' | 'group' | 'supergroup' }>, lang: Lang) => {
   const kb = new InlineKeyboard()
-  for (const ch of channels) kb.url(`📢 ${ch.title.slice(0, 45)}`, ch.url).row()
+  for (const ch of channels) kb.url(`${ch.kind && ch.kind !== 'channel' ? '👥' : '📢'} ${ch.title.slice(0, 45)}`, ch.url).row()
   kb.text(lang === 'fa' ? '✅ بررسی عضویت' : '✅ Check membership', 'membership:check')
   return styleInline(kb)
 }
 
-export const adminChannelsKeyboard = (channels: Array<{ title: string; url: string; chatId: string }>) => {
+export const adminChannelsKeyboard = (channels: Array<{ title: string; url: string; chatId: string; kind?: 'channel' | 'group' | 'supergroup' }>) => {
   const kb = new InlineKeyboard()
-  channels.forEach((ch, i) => kb.text(`🗑 ${i + 1}. ${ch.title.slice(0, 35)}`, `admch:del:${i}`).row())
-  kb.text('➕ افزودن کانال', 'admch:add').row()
+  channels.forEach((ch, i) => kb.text(`🗑 ${i + 1}. ${ch.kind && ch.kind !== 'channel' ? '👥' : '📢'} ${ch.title.slice(0, 31)}`, `admch:del:${i}`).row())
+  kb.text('➕ افزودن گروه / کانال', 'admch:add').row()
   kb.text('⬅️ بازگشت به تنظیمات', 'admin:settings')
   return styleInline(kb)
 }

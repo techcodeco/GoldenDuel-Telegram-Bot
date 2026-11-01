@@ -5,6 +5,7 @@
   "type": "module",
   "main": "./dist/main.js",
   "scripts": {
+    "dev": "cross-env NODE_ENV=development tsx watch src/main.ts",
     "start": "node .",
     "build": "tsc && tsc-alias --resolve-full-paths --resolve-full-extension .js",
     "typecheck": "tsc --noEmit",
@@ -21,6 +22,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "esbuild": "latest",
+    "cross-env": "^7.0.3",
     "tsx": "^4.19.0",
     "typescript": "^5.5.0",
     "tsc-alias": "^1.9.9"

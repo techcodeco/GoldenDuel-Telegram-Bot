@@ -441,8 +441,12 @@ export const GroupConfig = model('GroupConfig', new Schema({
 export const GroupDuel = model('GroupDuel', new Schema({
   _id: String, chatId: { type: String, index: true }, activatorId: Number, initiatorId: Number, opponentId: Number,
   currency: String, amount: Number, mode: String, status: { type: String, index: true }, inviteDeadline: Number,
-  deadline: Number, reminderAt: Number, reminderSent: { type: Boolean, default: false }, p1Choice: String, p2Choice: String, outcome: String, winnerId: Number, fee: Number, reward: Number,
+  deadline: Number, reminderAt: Number, reminderSent: { type: Boolean, default: false }, reminderProcessingAt: Date, p1Choice: String, p2Choice: String, outcome: String, winnerId: Number, fee: Number, payout1: Number, payout2: Number, reward: Number,
   rewardPaid: Boolean, timeoutSettled: { type: Boolean, default: false }, timeoutResultSentAt: Date, rewardPercent: Number, settledAt: Date, inviteMessageId: Number, gameMessageId: Number, timingScheduledAt: Date,
+  triggerMessageId: Number, opponentInviteEphemeralId: Number, initiatorWaitEphemeralId: Number,
+  initiatorGameEphemeralId: Number, opponentGameEphemeralId: Number, initiatorRematchEphemeralId: Number,
+  opponentRematchEphemeralId: Number, gameFormsSent: { type: Boolean, default: false }, rematchFormsSent: { type: Boolean, default: false }, resultMessageId: Number,
+  rematchOf: { type: String, index: true }, rematchDuelId: String,
 }, { timestamps: true, versionKey: false, strict: false }))
 GroupDuel.schema.index({ status: 1, inviteDeadline: 1 })
 GroupDuel.schema.index({ status: 1, deadline: 1 })

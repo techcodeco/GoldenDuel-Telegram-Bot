@@ -92,6 +92,12 @@ export interface IMatch {
   maxMessages?: number
   p1: number
   p2: number
+  p1MessageId?: number
+  p2MessageId?: number
+  resultMessageId1?: number
+  resultMessageId2?: number
+  rematchStartedBy?: number
+  rematchStartedAt?: Date
   c1: 'r' | 'p' | 's' | null
   c2: 'r' | 'p' | 's' | null
   status: 'choosing' | 'settled'
@@ -115,6 +121,12 @@ const matchSchema = new Schema<IMatch>(
     maxMessages: Number,
     p1: { type: Number, required: true, index: true },
     p2: { type: Number, required: true, index: true },
+    p1MessageId: Number,
+    p2MessageId: Number,
+    resultMessageId1: Number,
+    resultMessageId2: Number,
+    rematchStartedBy: Number,
+    rematchStartedAt: Date,
     c1: { type: String, default: null },
     c2: { type: String, default: null },
     status: { type: String, default: 'choosing' },

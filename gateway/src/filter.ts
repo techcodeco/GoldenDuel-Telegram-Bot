@@ -14,9 +14,13 @@ const GROUP_WORDS = new Set([
   "/duel",
   "competition",
   "/competition",
+  "challenge",
+  "/challenge",
   "دوئل",
   "فایت",
   "رقابت",
+  "چالنج",
+  "چالش",
   "help",
   "/help",
   "guide",
@@ -61,9 +65,13 @@ export function isGroupTrigger(
     "/duel",
     "competition",
     "/competition",
+    "challenge",
+    "/challenge",
     "دوئل",
     "فایت",
     "رقابت",
+    "چالنج",
+    "چالش",
   ]).has(s);
   return !fight || isReply;
 }

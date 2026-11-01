@@ -170,7 +170,7 @@ export async function reconcileDuelJobs(fullScan = false): Promise<void> {
         { timingScheduledAt: { $lte: new Date(Date.now() - Math.max(RECONCILE_EVERY_MS * 3, 180_000)) } },
       ]
       if (cursor) query._id = { $gt: cursor }
-      const rows = await GroupDuel.find(query).select('_id status inviteDeadline deadline reminderAt reminderSent gameMessageId timingScheduledAt').sort({ _id: 1 }).limit(500).lean() as any[]
+      const rows = await GroupDuel.find(query).select('_id status inviteDeadline deadline reminderAt reminderSent gameMessageId gameFormsSent timingScheduledAt').sort({ _id: 1 }).limit(500).lean() as any[]
       if (!rows.length) break
       await pool(rows, 20, async (d) => {
         const deadline = Number(d[deadlineField] ?? Date.now())
@@ -178,7 +178,7 @@ export async function reconcileDuelJobs(fullScan = false): Promise<void> {
           await scheduleGroupInviteTimeout(d._id, deadline)
         } else {
           const jobs: Promise<void>[] = [scheduleGroupMatchTimeout(d._id, deadline)]
-          if (d.gameMessageId != null && d.reminderAt != null && Number.isFinite(Number(d.reminderAt)) && !d.reminderSent && Number(d.reminderAt) < deadline) {
+          if (d.gameFormsSent === true && d.reminderAt != null && Number.isFinite(Number(d.reminderAt)) && !d.reminderSent && Number(d.reminderAt) < deadline) {
             jobs.push(scheduleGroupMatchReminder(d._id, Number(d.reminderAt)))
           }
           await Promise.all(jobs)
@@ -190,12 +190,17 @@ export async function reconcileDuelJobs(fullScan = false): Promise<void> {
     }
   }
 
-  // If Telegram was unavailable through all job retries, keep retrying only the missing
-  // timeout result message. Normal instant settlements are not selected here.
-  const unsentTimeoutResults = await GroupDuel.find({
-    status: 'settled', timeoutSettled: true, timeoutResultSentAt: { $exists: false },
+  // Recover timeout announcements and private rematch cards interrupted by a
+  // restart. This also repairs instant settlements if group-worker stopped
+  // after committing the wallet transaction but before sending both cards.
+  const pendingGroupFollowups = await GroupDuel.find({
+    status: 'settled',
+    $or: [
+      { timeoutSettled: true, timeoutResultSentAt: { $exists: false } },
+      { rematchFormsSent: { $ne: true } },
+    ],
   }).select('_id deadline').sort({ _id: 1 }).limit(500).lean() as any[]
-  await pool(unsentTimeoutResults, 20, async (duel) => {
+  await pool(pendingGroupFollowups, 20, async (duel) => {
     await scheduleGroupMatchTimeout(String(duel._id), Number(duel.deadline ?? Date.now()))
   })
 }

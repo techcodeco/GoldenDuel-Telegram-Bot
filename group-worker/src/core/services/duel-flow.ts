@@ -1,12 +1,27 @@
 import mongoose from 'mongoose'
 import { InlineKeyboard } from 'grammy'
-import { bot, redis, langOf, tr, curLabel, fmt, mention, userStarted, startKeyboard, getUser, groupKeyboard } from '../runtime'
+import { bot, redis, langOf, tr, curLabel, fmt, mention, userStarted, getUser, startKeyboard } from '../runtime'
 import { GroupConfig, GroupDuel, Settings } from '../models/index'
 import { setFlow, reserve, release } from './wallet'
 import { scheduleGroupInviteTimeout } from './timing'
-import { editEphemeralMessage, sendEphemeralMessage } from '../bot/ephemeral'
+import { deleteEphemeralMessage, editEphemeralMessage, sendEphemeralMessage } from '../bot/ephemeral'
 import { groupModeNeedsStake, type GroupFlow, type GroupCurrency, type GroupMode, type MessageReference } from '../contracts/group'
 import { logError } from '../logger'
+
+async function buildStartKeyboard(lang: 'fa' | 'en') {
+  const configured = startKeyboard(lang)
+  if (configured) return configured
+  try {
+    const me = await bot.api.getMe()
+    if (!me.username) return undefined
+    return { inline_keyboard: [[{
+      text: tr(lang, '▶️ شروع ربات', '▶️ Start bot'),
+      url: `https://t.me/${me.username}?start=group_duel`,
+    }]] }
+  } catch {
+    return undefined
+  }
+}
 
 function colorize<T extends { inline_keyboard?: any[][] }>(keyboard: T): T {
   for (const row of keyboard.inline_keyboard ?? []) for (const button of row) {
@@ -19,13 +34,15 @@ function colorize<T extends { inline_keyboard?: any[][] }>(keyboard: T): T {
 function choicePromptKeyboard(lang: 'fa' | 'en') {
   return colorize(new InlineKeyboard()
     .text(tr(lang, '🎲 شرطی', '🎲 Bet'), 'gw:flow:mode:bet')
-    .text(tr(lang, '🤝 دوستانه', '🤝 Friendly'), 'gw:flow:mode:friendly'))
+    .text(tr(lang, '🤝 دوستانه', '🤝 Friendly'), 'gw:flow:mode:friendly')
+    .row().text(tr(lang, '↩️ بازگشت', '↩️ Back'), 'gw:flow:back'))
 }
 
 function currencyKeyboard(lang: 'fa' | 'en') {
   return colorize(new InlineKeyboard()
     .text(tr(lang, '💵 تومان', '💵 Toman'), 'gw:flow:cur:IRT')
-    .text('💎 TON', 'gw:flow:cur:TON'))
+    .text('💎 TON', 'gw:flow:cur:TON')
+    .row().text(tr(lang, '⬅️ بازگشت به نوع رقابت', '⬅️ Back to mode'), 'gw:flow:back:mode'))
 }
 
 function amountKeyboard(amounts: number[], currency: GroupCurrency, lang: 'fa' | 'en') {
@@ -34,6 +51,8 @@ function amountKeyboard(amounts: number[], currency: GroupCurrency, lang: 'fa' |
     kb.text(`${fmt(amount, currency)} ${curLabel(currency, lang)}`, `gw:flow:amt:${amount}`)
     if (index % 2 === 1) kb.row()
   })
+  if (kb.inline_keyboard[kb.inline_keyboard.length - 1]?.length) kb.row()
+  kb.text(tr(lang, '⬅️ بازگشت به انتخاب ارز', '⬅️ Back to currency'), 'gw:flow:back:currency')
   return colorize(kb)
 }
 
@@ -57,19 +76,32 @@ export async function beginFlow(
   target: { id: number; first_name?: string; last_name?: string; username?: string },
   triggerMessageId?: number,
 ) {
-  let lang = langOf((await getUser(actor.id))?.lang)
-  const reply = triggerMessageId ? { reply_parameters: { message_id: triggerMessageId } } : {}
+  const groupSettings = await GroupConfig.findOne({ chatId }).select('language').lean() as any
+  let lang = langOf(groupSettings?.language ?? (await getUser(actor.id))?.lang)
+  const privateNotice = async (receiverUserId: number, text: string, parseMode?: string, showStartButton = false) => {
+    try {
+      const keyboard = showStartButton ? await buildStartKeyboard(lang) : undefined
+      await sendEphemeralMessage(Number(chatId), receiverUserId, text, {
+        ...(parseMode ? { parse_mode: parseMode } : {}),
+        ...(keyboard ? { reply_markup: keyboard } : {}),
+      }, {
+        ...(triggerMessageId ? { replyMessageId: triggerMessageId } : {}),
+      })
+    } catch (error) {
+      logError('group_private_precondition_notice_failed', error, { chatId, receiverUserId, actorId: actor.id, targetId: target.id })
+    } finally {
+      if (triggerMessageId) await bot.api.deleteMessage(chatId, triggerMessageId).catch(() => undefined)
+    }
+  }
   if (!(await userStarted(actor.id))) {
-    await bot.api.sendMessage(chatId, tr(lang, 'برای دعوت به دوئل ابتدا ربات را در پیوی Start کن.', 'Start the bot in private before challenging anyone.'), {
-      ...reply, ...(startKeyboard(lang) ? { reply_markup: startKeyboard(lang) } : {}),
-    } as any)
+    await privateNotice(actor.id, tr(lang, 'برای دعوت به دوئل ابتدا ربات را در پیوی Start کن.', 'Start the bot in private before challenging anyone.'), undefined, true)
     return
   }
   if (!(await userStarted(target.id))) {
-    await bot.api.sendMessage(chatId, tr(lang,
+    await privateNotice(target.id, tr(lang,
       `${mention(target, lang)} برای تأیید یا رد دعوت باید ابتدا ربات را در پیوی Start کند.`,
       `${mention(target, lang)} must start the bot in private before accepting or rejecting the challenge.`,
-    ), { ...reply, parse_mode: 'HTML', ...(startKeyboard(lang) ? { reply_markup: startKeyboard(lang) } : {}) } as any)
+    ), 'HTML', true)
     return
   }
   const cfg = await GroupConfig.findOne({ chatId }).lean() as any
@@ -79,13 +111,16 @@ export async function beginFlow(
   lang = langOf(cfg.language)
   const settings = await Settings.findById('main').lean() as any
   if (settings?.features?.duelsEnabled === false) {
-    await bot.api.sendMessage(chatId, tr(lang, 'دوئل‌ها فعلاً توسط مالک ربات غیرفعال هستند.', 'Duels are currently disabled by the bot owner.'), reply as any)
+    await privateNotice(actor.id, tr(lang, 'دوئل‌ها فعلاً توسط مالک ربات غیرفعال هستند.', 'Duels are currently disabled by the bot owner.'))
     return
   }
 
   const modes: GroupMode[] = (cfg.allowedModes ?? ['bet', 'friendly']).filter((m: string): m is GroupMode => m === 'bet' || m === 'friendly')
   const currencies: GroupCurrency[] = (cfg.allowedCurrencies ?? ['IRT', 'TON']).filter((c: string): c is GroupCurrency => c === 'IRT' || c === 'TON')
-  if (!modes.length || (modes.includes('bet') && !currencies.length)) return
+  if (!modes.length || (modes.includes('bet') && !currencies.length)) {
+    await privateNotice(actor.id, tr(lang, 'در حال حاضر هیچ حالت مجازی برای دوئل در این گروه فعال نیست.', 'No duel mode is currently enabled in this group.'))
+    return
+  }
   const flow: GroupFlow = {
     chatId, actorId: actor.id,
     actorName: [actor.first_name, actor.last_name].filter(Boolean).join(' ') || '', actorUsername: actor.username ?? '',
@@ -101,13 +136,11 @@ export async function beginFlow(
     } else {
       await advanceFlow(actor.id, flow)
     }
+    if (triggerMessageId) await bot.api.deleteMessage(chatId, triggerMessageId).catch(() => undefined)
   } catch (error) {
     logError('ephemeral_duel_form_send_failed', error, { chatId, actorId: actor.id, targetId: target.id, triggerMessageId })
     await redis.del(`gw:flow:${actor.id}`)
-    await bot.api.sendMessage(chatId, tr(lang,
-      '⚠️ فرم اختصاصی داخل گروه ارسال نشد. برای این قابلیت، ربات باید ادمین گروه باشد و تلگرام از پیام‌های خصوصی داخل گروه پشتیبانی کند.',
-      '⚠️ The private in-group form could not be sent. The bot must be a group administrator and the Telegram client must support ephemeral group messages.',
-    ), { ...reply } as any).catch(() => undefined)
+    // Fail closed: never replace a private form with a public group message.
   }
 }
 
@@ -180,13 +213,13 @@ export async function createInvite(uid: number, flow: GroupFlow, amount: number,
       if (mode === 'bet') await reserve(uid, String(currency), stake, session)
       await GroupDuel.create([{
         _id: id, chatId: flow.chatId, activatorId: cfg.activatorId, initiatorId: uid, opponentId: flow.targetId,
-        currency, amount: stake, mode, status: 'pending', inviteDeadline, triggerMessageId: flow.triggerMessageId, p1Choice: null, p2Choice: null,
+        currency, amount: stake, mode, status: 'pending', inviteDeadline, triggerMessageId: flow.triggerMessageId,
+        p1Choice: null, p2Choice: null, reminderSent: false,
       }], { session })
     })
   } finally {
     await session.endSession()
   }
-  await redis.del(`gw:flow:${uid}`)
 
   const lang = langOf(cfg.language)
   const actorMention = mention({ id: uid, first_name: flow.actorName, username: flow.actorUsername }, lang)
@@ -194,45 +227,77 @@ export async function createInvite(uid: number, flow: GroupFlow, amount: number,
   const modeLabel = mode === 'bet' ? tr(lang, 'شرطی', 'betting') : tr(lang, 'دوستانه', 'friendly')
   const stakeLineFa = mode === 'bet' ? `\n💰 مبلغ هر بازیکن: <b>${fmt(stake, String(currency))} ${curLabel(String(currency), lang)}</b>` : '\n🆓 بدون شرط مالی؛ این رقابت دوستانه است.'
   const stakeLineEn = mode === 'bet' ? `\n💰 Stake per player: <b>${fmt(stake, String(currency))} ${curLabel(String(currency), lang)}</b>` : '\n🆓 No stake; this is a friendly duel.'
-  const text = tr(lang,
-    `⚔️ <b>دعوت به رقابت ${modeLabel}</b>\n${actorMention} از ${targetMention} دعوت کرد.${stakeLineFa}\n${targetMention}، برای تأیید یا رد دعوت ${Math.ceil((inviteDeadline - Date.now()) / 1000)} ثانیه فرصت داری.`,
-    `⚔️ <b>${modeLabel} duel invitation</b>\n${actorMention} challenged ${targetMention}.${stakeLineEn}\n${targetMention}, you have ${Math.ceil((inviteDeadline - Date.now()) / 1000)} seconds to accept or reject.`,
+  const inviteText = tr(lang,
+    `⚔️ <b>دعوت خصوصی به رقابت ${modeLabel}</b>\n${actorMention} از شما (${targetMention}) دعوت کرده است.${stakeLineFa}\nبرای پاسخ ${Math.ceil((inviteDeadline - Date.now()) / 1000)} ثانیه فرصت داری.`,
+    `⚔️ <b>Private ${modeLabel} duel invitation</b>\n${actorMention} challenged you (${targetMention}).${stakeLineEn}\nYou have ${Math.ceil((inviteDeadline - Date.now()) / 1000)} seconds to respond.`,
+  )
+  const waitText = tr(lang,
+    `✅ دعوت خصوصی برای ${targetMention} ارسال شد.\n${stakeLineFa}\nتا پاسخ حریف منتظر بمان یا دعوت را لغو کن.`,
+    `✅ A private invitation was sent to ${targetMention}.\n${stakeLineEn}\nWait for the response or cancel the invitation.`,
   )
 
-  let sent: any
+  let opponentCard: any
+  let initiatorCard: any
   try {
-    sent = await bot.api.sendMessage(Number(flow.chatId), text, {
-      parse_mode: 'HTML',
-      ...(flow.triggerMessageId ? { reply_parameters: { message_id: flow.triggerMessageId } } : {}),
-      reply_markup: groupKeyboard([[
-        { text: tr(lang, '✅ تأیید دعوت', '✅ Accept'), callback_data: `gw:accept:${id}` },
-        { text: tr(lang, '❌ رد دعوت', '❌ Reject'), callback_data: `gw:reject:${id}` },
-      ]]),
-    } as any)
-  } catch {
+    // Persist the challenger's waiting card before exposing the opponent's
+    // actionable invitation. This closes the fast-accept race where the
+    // opponent could accept before X's cancel-card ID had been stored.
+    const waitKeyboard = colorize(new InlineKeyboard().text(tr(lang, '❌ لغو دعوت', '❌ Cancel invitation'), `gw:cancel:${id}`))
+    if (formRef?.ephemeralMessageId && formRef.receiverUserId === uid) {
+      await editEphemeralMessage(formRef.chatId, uid, formRef.ephemeralMessageId, waitText, {
+        parse_mode: 'HTML', reply_markup: { inline_keyboard: waitKeyboard.inline_keyboard },
+      })
+      initiatorCard = { ephemeral_message_id: formRef.ephemeralMessageId }
+    } else {
+      initiatorCard = await sendEphemeralMessage(Number(flow.chatId), uid, waitText, {
+        parse_mode: 'HTML', reply_markup: { inline_keyboard: waitKeyboard.inline_keyboard },
+      })
+    }
+    const savedWait = await GroupDuel.updateOne({ _id: id, status: 'pending' }, { $set: {
+      initiatorWaitEphemeralId: Number(initiatorCard?.ephemeral_message_id),
+    } })
+    if (!savedWait.modifiedCount) throw new Error('INITIATOR_WAIT_CARD_STATE_CHANGED')
+
+    const inviteKeyboard = colorize(new InlineKeyboard()
+      .text(tr(lang, '✅ قبول', '✅ Accept'), `gw:accept:${id}`)
+      .text(tr(lang, '❌ رد', '❌ Reject'), `gw:reject:${id}`))
+    opponentCard = await sendEphemeralMessage(Number(flow.chatId), flow.targetId, inviteText, {
+      parse_mode: 'HTML', reply_markup: { inline_keyboard: inviteKeyboard.inline_keyboard },
+    })
+    const savedInvite = await GroupDuel.updateOne({ _id: id, status: 'pending' }, { $set: {
+      opponentInviteEphemeralId: Number(opponentCard?.ephemeral_message_id),
+    } })
+    if (!savedInvite.modifiedCount) throw new Error('OPPONENT_INVITE_CARD_STATE_CHANGED')
+  } catch (error) {
+    if (opponentCard?.ephemeral_message_id) await deleteEphemeralMessage(Number(flow.chatId), flow.targetId, Number(opponentCard.ephemeral_message_id)).catch(() => undefined)
+    if (initiatorCard?.ephemeral_message_id) {
+      const sameAsFlow = Number(formRef?.ephemeralMessageId) === Number(initiatorCard.ephemeral_message_id)
+        && Number(formRef?.receiverUserId) === uid
+      if (sameAsFlow) {
+        await editEphemeralMessage(Number(flow.chatId), uid, Number(initiatorCard.ephemeral_message_id),
+          tr(lang, '⚠️ ارسال دعوت ناموفق بود؛ دوباره تلاش کن.', '⚠️ The invitation could not be sent. Please start again.'),
+          { reply_markup: { inline_keyboard: [] } },
+        ).catch(() => undefined)
+      } else {
+        await deleteEphemeralMessage(Number(flow.chatId), uid, Number(initiatorCard.ephemeral_message_id)).catch(() => undefined)
+      }
+    }
     const rollback = await mongoose.startSession()
     try {
       await rollback.withTransaction(async () => {
-        if (mode === 'bet') await release(uid, String(currency), stake, `group:invite-send-failed:${id}`, rollback)
-        await GroupDuel.updateOne({ _id: id, status: 'pending' }, { $set: { status: 'cancelled', outcome: 'invite_send_failed' } }, { session: rollback })
+        const current = await GroupDuel.findOneAndUpdate({ _id: id, status: 'pending' }, { $set: { status: 'cancelled', outcome: 'invite_send_failed' } }, { new: true, session: rollback }).lean() as any
+        if (current?.mode === 'bet') await release(uid, String(current.currency), Number(current.amount), `group:invite-send-failed:${id}`, rollback)
       })
-    } finally {
-      await rollback.endSession()
-    }
+    } finally { await rollback.endSession() }
     throw new Error('GROUP_SEND_FAILED')
   }
 
-  await GroupDuel.updateOne({ _id: id }, { $set: { inviteMessageId: sent.message_id } })
+  await redis.del(`gw:flow:${uid}`)
   try {
     await scheduleGroupInviteTimeout(id, inviteDeadline)
     await GroupDuel.updateOne({ _id: id, status: 'pending' }, { $set: { timingScheduledAt: new Date() } })
   } catch (error) {
-    // The BullMQ worker reconciles pending GroupDuel records if the stream request temporarily fails.
+    // BullMQ reconciles pending invitations if the stream request is temporarily unavailable.
     logError('invite_timeout_schedule_failed', error, { duelId: id })
-  }
-
-  const waitText = tr(lang, '✅ دعوت در گروه ارسال شد؛ منتظر پاسخ حریف بمان.', '✅ The challenge was posted in the group. Wait for your opponent’s response.')
-  if (formRef?.ephemeralMessageId && formRef.receiverUserId) {
-    await editEphemeralMessage(formRef.chatId, formRef.receiverUserId, formRef.ephemeralMessageId, waitText, { reply_markup: { inline_keyboard: [] } }).catch(() => undefined)
   }
 }

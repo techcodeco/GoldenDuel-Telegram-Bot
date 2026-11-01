@@ -1,8 +1,10 @@
 import { logError } from '../logger'
 import mongoose from 'mongoose'
+import { InlineKeyboard } from 'grammy'
 import { bot, langOf, tr, curLabel, fmt, mention, getUser } from '../runtime'
 import { GroupConfig, GroupDuel, Settings, User, Ledger, House } from '../models/index'
 import { disableGameMessage, replyToGameMessage } from './game-message'
+import { sendEphemeralMessage } from '../bot/ephemeral'
 import { groupDuelHasStake } from '../contracts/group'
 
 export async function settleDuel(id: string, timeout = false) {
@@ -131,11 +133,11 @@ export async function settleDuel(id: string, timeout = false) {
       }
       const changed = await GroupDuel.updateOne(
         { _id: id, status: 'settling' },
-        { $set: { status: 'settled', winnerId, outcome, fee, reward, rewardPaid: reward > 0, settledAt: new Date() } },
+        { $set: { status: 'settled', winnerId, outcome, fee, payout1, payout2, reward, rewardPaid: reward > 0, settledAt: new Date() } },
         { session },
       )
       if (!changed.modifiedCount) throw new Error('DUEL_STATE_RACE')
-      final = { ...duel, winnerId, outcome, fee, reward, rewardPercent, houseFee, settledAt: new Date() }
+      final = { ...duel, winnerId, outcome, fee, reward, rewardPercent, houseFee, payout1, payout2, settledAt: new Date() }
     })
   } finally {
     await session.endSession()
@@ -155,20 +157,62 @@ export async function settleDuel(id: string, timeout = false) {
   const choiceLabel = (choice: string | null) => choice === 'r' ? tr(lang, 'سنگ', 'Rock') : choice === 'p' ? tr(lang, 'کاغذ', 'Paper') : choice === 's' ? tr(lang, 'قیچی', 'Scissors') : tr(lang, 'بدون انتخاب', 'No move')
   const mode = final.mode === 'bet' ? tr(lang, 'شرطی', 'bet') : tr(lang, 'دوستانه', 'friendly')
   const showStake = groupDuelHasStake(final)
+  const payout = Number(final.winnerId) === Number(final.initiatorId) ? Number(final.payout1) : Number(final.winnerId) === Number(final.opponentId) ? Number(final.payout2) : Number(final.payout1)
+  const rewardLineFa = Number(final.reward) > 0 ? `\n🎁 <b>پاداش فعال‌کننده:</b> ${fmt(final.reward, String(final.currency))} ${curLabel(String(final.currency), lang)}` : ''
+  const rewardLineEn = Number(final.reward) > 0 ? `\n🎁 <b>Activator reward:</b> ${fmt(final.reward, String(final.currency))} ${curLabel(String(final.currency), lang)}` : ''
   const moneySummaryFa = showStake
-    ? `\n💰 <b>مبلغ هر بازیکن:</b> ${fmt(final.amount, String(final.currency))} ${curLabel(String(final.currency), lang)}\n🏦 <b>مجموع مبلغ رقابت:</b> ${fmt(2 * final.amount, String(final.currency))} ${curLabel(String(final.currency), lang)}\n🧾 <b>کارمزد:</b> ${fmt(final.fee, String(final.currency))} ${curLabel(String(final.currency), lang)}`
+    ? `\n💰 <b>مبلغ هر بازیکن:</b> ${fmt(final.amount, String(final.currency))} ${curLabel(String(final.currency), lang)}\n🏦 <b>مجموع مبلغ رقابت:</b> ${fmt(2 * final.amount, String(final.currency))} ${curLabel(String(final.currency), lang)}\n🧾 <b>کارمزد:</b> ${fmt(final.fee, String(final.currency))} ${curLabel(String(final.currency), lang)}\n💵 <b>دریافتی برنده / هر بازیکن در مساوی:</b> ${fmt(payout, String(final.currency))} ${curLabel(String(final.currency), lang)}${rewardLineFa}`
     : '\n🆓 رقابت دوستانه بدون شرط مالی بود.'
   const moneySummaryEn = showStake
-    ? `\n💰 <b>Stake per player:</b> ${fmt(final.amount, String(final.currency))} ${curLabel(String(final.currency), lang)}\n🏦 <b>Total duel stake:</b> ${fmt(2 * final.amount, String(final.currency))} ${curLabel(String(final.currency), lang)}\n🧾 <b>Fee:</b> ${fmt(final.fee, String(final.currency))} ${curLabel(String(final.currency), lang)}`
+    ? `\n💰 <b>Stake per player:</b> ${fmt(final.amount, String(final.currency))} ${curLabel(String(final.currency), lang)}\n🏦 <b>Total duel stake:</b> ${fmt(2 * final.amount, String(final.currency))} ${curLabel(String(final.currency), lang)}\n🧾 <b>Fee:</b> ${fmt(final.fee, String(final.currency))} ${curLabel(String(final.currency), lang)}\n💵 <b>Winner payout / each draw payout:</b> ${fmt(payout, String(final.currency))} ${curLabel(String(final.currency), lang)}${rewardLineEn}`
     : '\n🆓 This friendly duel had no stake.'
   const resultText = tr(lang,
     `🏁 <b>پایان رقابت ${mode}</b>\n${result}\n🎮 <b>انتخاب‌ها:</b> ${p1}: ${choiceLabel(final.p1Choice)}  ·  ${p2}: ${choiceLabel(final.p2Choice)}${moneySummaryFa}`,
     `🏁 <b>${mode} duel finished</b>\n${result}\n🎮 <b>Moves:</b> ${p1}: ${choiceLabel(final.p1Choice)}  ·  ${p2}: ${choiceLabel(final.p2Choice)}${moneySummaryEn}`,
   )
   await disableGameMessage(final, lang)
-  await replyToGameMessage(final, resultText).catch(async () => {
-    await bot.api.sendMessage(Number(final.chatId), resultText, { parse_mode: 'HTML' }).catch(() => undefined)
-  })
+  let resultMessage: any = null
+  try {
+    resultMessage = await replyToGameMessage(final, resultText)
+    if (Number(resultMessage?.message_id) > 0) await GroupDuel.updateOne({ _id: id, status: 'settled' }, { $set: { resultMessageId: Number(resultMessage.message_id) } })
+  } catch (error) {
+    logError('group_result_message_failed', error, { duelId: id })
+  }
+
+  // Each participant gets their own rematch control; no callback button is exposed publicly.
+  const rematchKeyboard = new InlineKeyboard().text(tr(lang, '🔁 شروع دوباره', '🔁 Rematch'), `gw:rematch:${id}`)
+  for (const row of rematchKeyboard.inline_keyboard) for (const button of row) (button as any).style = 'success'
+  // Native Telegram does not support a recipient-specific keyboard on a public
+  // message. Send a zero-width ephemeral reply containing only the button, anchored
+  // directly under the public result; no second visible text message is created.
+  const rematchButtonOnly = '\u2063'
+  try {
+    const currentCards = await GroupDuel.findById(id).select('initiatorRematchEphemeralId opponentRematchEphemeralId').lean() as any
+    let initiatorCardId = Number(currentCards?.initiatorRematchEphemeralId) || 0
+    let opponentCardId = Number(currentCards?.opponentRematchEphemeralId) || 0
+    if (!initiatorCardId) {
+      if (!resultMessage?.message_id) throw new Error('PUBLIC_RESULT_MESSAGE_MISSING_FOR_REMATCH')
+      const r1 = await sendEphemeralMessage(Number(final.chatId), Number(final.initiatorId), rematchButtonOnly, {
+        reply_markup: { inline_keyboard: rematchKeyboard.inline_keyboard },
+      }, { replyMessageId: Number(resultMessage.message_id) })
+      initiatorCardId = Number(r1?.ephemeral_message_id) || 0
+      if (!initiatorCardId) throw new Error('INITIATOR_REMATCH_CARD_ID_MISSING')
+      await GroupDuel.updateOne({ _id: id, status: 'settled' }, { $set: { initiatorRematchEphemeralId: initiatorCardId } })
+    }
+    if (!opponentCardId) {
+      const r2 = await sendEphemeralMessage(Number(final.chatId), Number(final.opponentId), rematchButtonOnly, {
+        reply_markup: { inline_keyboard: rematchKeyboard.inline_keyboard },
+      }, { replyMessageId: Number(resultMessage.message_id) })
+      opponentCardId = Number(r2?.ephemeral_message_id) || 0
+      if (!opponentCardId) throw new Error('OPPONENT_REMATCH_CARD_ID_MISSING')
+      await GroupDuel.updateOne({ _id: id, status: 'settled' }, { $set: { opponentRematchEphemeralId: opponentCardId } })
+    }
+    await GroupDuel.updateOne({ _id: id, status: 'settled' }, { $set: { rematchFormsSent: true } })
+  } catch (error) {
+    logError('group_rematch_forms_failed', error, { duelId: id })
+    // BullMQ reconciliation retries any settled duel whose rematchFormsSent flag is still false.
+  }
+
 
   if (Number(final.reward) > 0) {
     const groupTitle = String(group?.title ?? tr(lang, 'گروه تلگرام', 'Telegram group'))

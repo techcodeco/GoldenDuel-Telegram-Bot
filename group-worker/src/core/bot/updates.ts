@@ -57,7 +57,8 @@ export async function handleUpdate(fields: Record<string, string>) {
   if (!trigger) return
 
   if (trigger === 'help') {
-    await sendHelp(m.chat.id, lang, Number(m.message_id))
+    await sendHelp(m.chat.id, lang, Number(m.from.id), Number(m.message_id))
+      .catch((error) => logError('group_private_help_send_failed', error, { chatId, userId: m.from.id, messageId: m.message_id }))
     return
   }
 
@@ -69,21 +70,38 @@ export async function handleUpdate(fields: Record<string, string>) {
           '⛔ Only this group’s activator can access its management panel.',
         ), {}, { replyMessageId: Number(m.message_id) })
       } catch (error) {
+        // Never expose access-control notices as public group messages.
         logError('ephemeral_access_denied_notice_failed', error, { chatId: m.chat.id, userId: m.from.id })
-        await bot.api.sendMessage(m.chat.id, tr(lang,
-          '⛔ فقط فعال‌کنندهٔ ربات اجازهٔ دسترسی به پنل مدیریت را دارد.',
-          '⛔ Only the bot activator can access the management panel.',
-        ), { reply_parameters: { message_id: Number(m.message_id) } } as any).catch((error) => logError('dashboard_access_denied_fallback_failed', error, { chatId, userId: m.from.id }))
+      } finally {
+        await bot.api.deleteMessage(m.chat.id, Number(m.message_id)).catch(() => undefined)
       }
       return
     }
-    await sendDashboard(chatId, Number(m.from.id), cfg, Number(m.message_id)).catch((error) => logError('dashboard_request_failed', error, { chatId, userId: m.from.id, messageId: m.message_id }))
+    try {
+      await sendDashboard(chatId, Number(m.from.id), cfg, Number(m.message_id))
+    } catch (error) {
+      logError('dashboard_request_failed', error, { chatId, userId: m.from.id, messageId: m.message_id })
+    } finally {
+      await bot.api.deleteMessage(m.chat.id, Number(m.message_id)).catch(() => undefined)
+    }
     return
   }
 
   if (trigger === 'fight') {
     const reply = m.reply_to_message
-    if (!reply?.from || reply.from.is_bot || Number(reply.from.id) === Number(m.from.id)) return
+    if (!reply?.from || reply.from.is_bot || Number(reply.from.id) === Number(m.from.id)) {
+      try {
+        await sendEphemeralMessage(m.chat.id, Number(m.from.id), tr(lang,
+          'برای دعوت، باید روی پیام حریف ریپلای کنی و سپس واژهٔ دوئل را بفرستی.',
+          'Reply to your opponent’s message before sending the duel trigger.',
+        ), {}, { replyMessageId: Number(m.message_id) })
+      } catch (error) {
+        logError('invalid_group_challenge_notice_failed', error, { chatId, userId: m.from.id })
+      } finally {
+        await bot.api.deleteMessage(m.chat.id, Number(m.message_id)).catch(() => undefined)
+      }
+      return
+    }
     await beginFlow(chatId, m.from, reply.from, Number(m.message_id))
   }
 }

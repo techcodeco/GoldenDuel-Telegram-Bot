@@ -1,3 +1,4 @@
+import { InlineKeyboard } from 'grammy'
 import { logError } from '../logger'
 import mongoose from 'mongoose'
 import { bot } from './instance'
@@ -8,8 +9,8 @@ import { getFlow, reserve, release } from '../services/wallet'
 import { advanceFlow, createInvite } from '../services/duel-flow'
 import { groupLang, renderDashboard, renderTimeoutPanel } from '../services/group'
 import { settleDuel } from '../services/settlement'
-import { scheduleGroupMatchReminder } from '../services/timing'
-import { closeInviteKeyboard, gameKeyboard, gameProgressText, refreshGameProgress } from '../services/game-message'
+import { scheduleGroupInviteTimeout, scheduleGroupMatchReminder } from '../services/timing'
+import { acknowledgePlayerChoice, closeInviteKeyboard, notifyOpponentChoice, sendPlayerGameForms } from '../services/game-message'
 import { deleteEphemeralMessage, editEphemeralMessage, editMessageReference, messageReferenceFromCallback, sendEphemeralMessage } from './ephemeral'
 
 async function answer(q: any, text?: string, showAlert = false) {
@@ -141,40 +142,56 @@ export async function handleCallback(update: any) {
   if (data.startsWith('gw:flow:')) {
     const flow = await getFlow(uid)
     if (!flow) return answer(q, tr(langOf((await getUser(uid))?.lang), '⌛ این فرم منقضی شده است؛ دوباره «دوئل» را بفرست.', '⌛ This form has expired. Start a new duel.'), true)
-    if (uid !== Number(flow.actorId) || String(msg?.chat?.id) !== String(flow.chatId)) {
-      return answer(q, tr(await callbackLang(flow.chatId), '⛔ این فرم برای شما نیست.', '⛔ This form does not belong to you.'), true)
+    const ref = callbackMessageRef(q, uid)
+    if (uid !== Number(flow.actorId) || String(msg?.chat?.id) !== String(flow.chatId)
+      || !Number.isInteger(msg?.ephemeral_message_id)
+      || (Number(flow.formMessageId) > 0 && Number(flow.formMessageId) !== Number(msg.ephemeral_message_id))) {
+      return answer(q, tr(await callbackLang(flow.chatId), '⛔ این فرم برای شما نیست یا منقضی شده است.', '⛔ This form is not yours or has expired.'), true)
     }
     const parts = data.split(':')
-    const ref = callbackMessageRef(q, uid)
+    if (parts[2] === 'back') {
+      const target = parts[3]
+      if (!target) {
+        await redis.del(`gw:flow:${uid}`)
+        await editEphemeralMessage(Number(flow.chatId), uid, Number(msg.ephemeral_message_id), tr(await callbackLang(flow.chatId), 'فرایند دعوت لغو شد.', 'Invitation setup cancelled.'), { reply_markup: { inline_keyboard: [] } }).catch(() => undefined)
+        return answer(q, tr(await callbackLang(flow.chatId), 'فرایند لغو شد.', 'Setup cancelled.'))
+      }
+      if (target === 'mode') { flow.mode = null; flow.currency = null }
+      else if (target === 'currency') { flow.currency = null }
+      else return answer(q)
+      try {
+        await advanceFlow(uid, flow, ref)
+        await answer(q)
+      } catch (error: any) {
+        logError('group_flow_back_failed', error, { chatId: flow.chatId, userId: uid, target })
+        await answer(q, tr(await callbackLang(flow.chatId), 'بازگشت انجام نشد؛ دوباره تلاش کن.', 'Could not go back. Try again.'), true)
+      }
+      return
+    }
     if (parts[2] === 'mode' && (parts[3] === 'bet' || parts[3] === 'friendly')) flow.mode = parts[3] as GroupMode
     else if (parts[2] === 'cur' && (parts[3] === 'IRT' || parts[3] === 'TON')) flow.currency = parts[3] as GroupCurrency
     else if (parts[2] === 'amt') {
       const amount = Number(parts[3])
       try {
         await createInvite(uid, flow, amount, ref)
-        await answer(q, tr(await callbackLang(flow.chatId), '✅ دعوت در گروه ارسال شد.', '✅ Challenge posted in the group.'))
+        await answer(q, tr(await callbackLang(flow.chatId), '✅ دعوت خصوصی ارسال شد.', '✅ Private invitation sent.'))
       } catch (error: any) {
         const lang = await callbackLang(flow.chatId)
         const message = error?.message === 'INSUFFICIENT_BALANCE'
-          ? tr(lang, '❌ موجودی آزاد باید از مبلغ رقابت بیشتر باشد.', '❌ Your available balance must be greater than the stake.')
+          ? tr(lang, '❌ موجودی آزاد برای این مبلغ کافی نیست.', '❌ Insufficient available balance for this stake.')
           : error?.message === 'GROUP_CONFIG_CHANGED'
             ? tr(lang, '⚠️ تنظیمات گروه تغییر کرده است؛ فرم را دوباره باز کن.', '⚠️ Group settings changed; reopen the form.')
             : tr(lang, '❌ ساخت دعوت ناموفق بود؛ دوباره تلاش کن.', '❌ Could not create the invitation. Try again.')
         await answer(q, message, true)
       }
       return
-    } else {
-      return answer(q)
-    }
+    } else return answer(q)
 
     try {
       await advanceFlow(uid, flow, ref)
       await answer(q)
     } catch (error: any) {
-      await answer(q, tr(await callbackLang(flow.chatId),
-        '⚠️ ادامهٔ فرم ممکن نشد؛ دوباره از «دوئل» شروع کن.',
-        '⚠️ The form could not continue. Start again with “duel”.',
-      ), true)
+      await answer(q, tr(await callbackLang(flow.chatId), '⚠️ ادامهٔ فرم ممکن نشد؛ دوباره از «دوئل» شروع کن.', '⚠️ The form could not continue. Start again with “duel”.'), true)
     }
     return
   }
@@ -183,15 +200,12 @@ export async function handleCallback(update: any) {
     const id = data.split(':')[2]
     if (!id) return answer(q)
     const duel = await GroupDuel.findOne({ _id: id, status: 'pending' }).lean() as any
-    if (!duel) {
-      const lang = await callbackLang(String(msg?.chat?.id ?? ''))
-      return answer(q, tr(lang, '⌛ این دعوت دیگر فعال نیست.', '⌛ This invitation is no longer active.'), true)
-    }
+    if (!duel) return answer(q, tr(await callbackLang(String(msg?.chat?.id ?? '')), '⌛ این دعوت دیگر فعال نیست.', '⌛ This invitation is no longer active.'), true)
     const lang = await callbackLang(String(duel.chatId))
-    if (String(msg?.chat?.id) !== String(duel.chatId)) return answer(q, tr(lang, 'این دعوت متعلق به گروه دیگری است.', 'This invitation belongs to another group.'), true)
-    if (uid !== Number(duel.opponentId)) {
-      return answer(q, tr(lang, '⛔ فقط کاربری که دعوت شده می‌تواند دوئل را تأیید یا رد کند.', '⛔ Only the invited player can accept or reject this duel.'), true)
+    if (String(msg?.chat?.id) !== String(duel.chatId) || Number(msg?.ephemeral_message_id) !== Number(duel.opponentInviteEphemeralId)) {
+      return answer(q, tr(lang, 'این دعوت خصوصی معتبر نیست.', 'This private invitation is not valid.'), true)
     }
+    if (uid !== Number(duel.opponentId)) return answer(q, tr(lang, '⛔ فقط بازیکن دعوت‌شده می‌تواند پاسخ دهد.', '⛔ Only the invited player can respond.'), true)
     if (Date.now() > Number(duel.inviteDeadline)) {
       await expireInvite(id)
       return answer(q, tr(lang, '⌛ مهلت این دعوت تمام شده است.', '⌛ This invitation has expired.'), true)
@@ -199,34 +213,28 @@ export async function handleCallback(update: any) {
 
     if (data.startsWith('gw:reject:')) {
       const session = await mongoose.startSession()
-      let rejected = false
+      let rejected: any = null
       try {
         await session.withTransaction(async () => {
-          const current = await GroupDuel.findOneAndUpdate(
+          rejected = await GroupDuel.findOneAndUpdate(
             { _id: id, status: 'pending', inviteDeadline: { $gt: Date.now() } },
-            { $set: { status: 'rejected' } }, { new: true, session },
+            { $set: { status: 'rejected', outcome: 'opponent_rejected' } }, { new: true, session },
           ).lean() as any
-          if (!current) return
-          if (groupDuelHasStake(current)) await release(current.initiatorId, String(current.currency), Number(current.amount), `group:invite-release:${id}`, session)
-          rejected = true
+          if (rejected && groupDuelHasStake(rejected)) await release(rejected.initiatorId, String(rejected.currency), Number(rejected.amount), `group:invite-release:${id}`, session)
         })
       } finally { await session.endSession() }
-      if (!rejected) return answer(q, tr(lang, '⌛ دعوت دیگر فعال نیست.', '⌛ This invitation is no longer active.'), true)
-      await closeInviteKeyboard(duel)
-      const [a, b] = await Promise.all([getUser(duel.initiatorId), getUser(duel.opponentId)])
-      const p1 = mention({ id: duel.initiatorId, first_name: a?.firstName, last_name: a?.lastName, username: a?.username }, lang)
-      const p2 = mention({ id: duel.opponentId, first_name: b?.firstName, last_name: b?.lastName, username: b?.username }, lang)
-      const mode = duel.mode === 'bet' ? tr(lang, 'شرطی', 'bet') : tr(lang, 'دوستانه', 'friendly')
-      const showStake = duel.mode === 'bet' && Number(duel.amount) > 0 && groupDuelHasStake(duel)
-      const stakeTextFa = showStake ? ` به مبلغ ${fmt(duel.amount, String(duel.currency))} ${curLabel(String(duel.currency), lang)}` : ' بدون شرط مالی'
-      const stakeTextEn = showStake ? ` for ${fmt(duel.amount, String(duel.currency))} ${curLabel(String(duel.currency), lang)}` : ' with no stake'
-      const text = tr(lang,
-        `❌ دعوت ${p1} از ${p2} برای رقابت ${mode}${stakeTextFa} رد شد.`,
-        `❌ ${p2} rejected ${p1}’s ${mode} duel invitation${stakeTextEn}.`,
-      )
-      await bot.api.sendMessage(Number(duel.chatId), text, { parse_mode: 'HTML', reply_parameters: { message_id: Number(duel.inviteMessageId ?? msg?.message_id) } } as any).catch(() => undefined)
-      await answer(q, tr(lang, 'دعوت رد شد.', 'Invitation rejected.'))
-      return
+      if (!rejected) return answer(q, tr(lang, '⌛ دعوت دیگر فعال نیست.', '⌛ Invitation is no longer active.'), true)
+      await closeInviteKeyboard(rejected)
+      const [a, b] = await Promise.all([getUser(rejected.initiatorId), getUser(rejected.opponentId)])
+      const p1 = mention({ id: rejected.initiatorId, first_name: a?.firstName, last_name: a?.lastName, username: a?.username }, lang)
+      const p2 = mention({ id: rejected.opponentId, first_name: b?.firstName, last_name: b?.lastName, username: b?.username }, lang)
+      const notice = tr(lang, `❌ دعوت ${p1} از ${p2} رد شد. مبلغ رزروشده، در صورت وجود، آزاد شد.`, `❌ ${p2} rejected ${p1}’s invitation. Any reserved stake has been released.`)
+      const ownNotice = tr(lang, '❌ دعوت را رد کردی؛ دعوت‌کننده مطلع شد و مبلغ رزروشده آزاد شد.', '❌ You rejected the invitation. The challenger was notified and any reserved stake was released.')
+      await Promise.all([
+        sendEphemeralMessage(Number(rejected.chatId), Number(rejected.initiatorId), notice, { parse_mode: 'HTML' }).catch(() => undefined),
+        sendEphemeralMessage(Number(rejected.chatId), Number(rejected.opponentId), ownNotice, { parse_mode: 'HTML' }).catch(() => undefined),
+      ])
+      return answer(q, tr(lang, 'دعوت رد شد.', 'Invitation rejected.'))
     }
 
     const session = await mongoose.startSession()
@@ -234,8 +242,6 @@ export async function handleCallback(update: any) {
     let insufficient = false
     try {
       await session.withTransaction(async () => {
-        accepted = false
-        insufficient = false
         const current = await GroupDuel.findOne({ _id: id, status: 'pending', inviteDeadline: { $gt: Date.now() } }).session(session).lean() as any
         if (!current) return
         if (groupDuelHasStake(current)) {
@@ -249,50 +255,36 @@ export async function handleCallback(update: any) {
         const reminderAt = groupReminderAt(startedAt, seconds)
         const changed = await GroupDuel.updateOne(
           { _id: id, status: 'pending', inviteDeadline: { $gt: Date.now() } },
-          { $set: { status: 'choosing', deadline, reminderAt, reminderSent: false, p1Choice: null, p2Choice: null } },
+          { $set: { status: 'choosing', deadline, reminderAt, reminderSent: false, p1Choice: null, p2Choice: null, gameFormsSent: false } },
           { session },
         )
         if (!changed.modifiedCount) throw new Error('INVITE_RACE')
         accepted = true
       })
     } finally { await session.endSession() }
-    if (insufficient) return answer(q, tr(lang,
-      '❌ موجودی آزاد کیف پولت باید بیشتر از مبلغ رقابت باشد. مبلغ را شارژ کن و سپس دوباره دعوت شو.',
-      '❌ Your available balance must be greater than the stake. Top up and ask for a new invitation.',
-    ), true)
-    if (!accepted) return answer(q, tr(lang, '⌛ دعوت دیگر فعال نیست.', '⌛ This invitation is no longer active.'), true)
+    if (insufficient) return answer(q, tr(lang, '❌ موجودی آزاد کیف پولت برای این مبلغ کافی نیست.', '❌ Your available balance is insufficient for this stake.'), true)
+    if (!accepted) return answer(q, tr(lang, '⌛ دعوت دیگر فعال نیست.', '⌛ Invitation is no longer active.'), true)
 
     const fresh = await GroupDuel.findById(id).lean() as any
     await closeInviteKeyboard(duel)
-    const prompt = await gameProgressText(fresh)
-    let game: any
     try {
-      game = await bot.api.sendMessage(Number(duel.chatId), prompt, {
-        parse_mode: 'HTML',
-        ...(duel.inviteMessageId ? { reply_parameters: { message_id: Number(duel.inviteMessageId) } } : {}),
-        reply_markup: gameKeyboard(id, lang),
-      } as any)
-    } catch {
+      await sendPlayerGameForms(fresh)
+    } catch (error) {
+      logError('group_private_game_forms_failed', error, { duelId: id })
       const rollback = await mongoose.startSession()
       try {
         await rollback.withTransaction(async () => {
-          const current = await GroupDuel.findOneAndUpdate({ _id: id, status: 'choosing' }, { $set: { status: 'cancelled', outcome: 'game_message_failed', settledAt: new Date() } }, { new: true, session: rollback }).lean() as any
-          if (!current) return
-          if (groupDuelHasStake(current)) {
+          const current = await GroupDuel.findOneAndUpdate({ _id: id, status: 'choosing', gameFormsSent: { $ne: true } }, { $set: { status: 'cancelled', outcome: 'game_forms_failed', settledAt: new Date() } }, { new: true, session: rollback }).lean() as any
+          if (current && groupDuelHasStake(current)) {
             await release(current.initiatorId, String(current.currency), Number(current.amount), `group:cancel-release:${id}:${current.initiatorId}`, rollback)
             await release(current.opponentId, String(current.currency), Number(current.amount), `group:cancel-release:${id}:${current.opponentId}`, rollback)
           }
         })
       } finally { await rollback.endSession() }
-      await bot.api.sendMessage(Number(duel.chatId), groupDuelHasStake(duel)
-        ? tr(lang, '⚠️ ارسال فرم بازی ناموفق بود؛ مبالغ رزروشده آزاد شدند.', '⚠️ The game form could not be posted; reserved funds were released.')
-        : tr(lang, '⚠️ ارسال فرم بازی ناموفق بود؛ دعوت لغو شد. دوباره تلاش کنید.', '⚠️ The game form could not be posted; the duel was cancelled. Please try again.'), {
-        ...(duel.inviteMessageId ? { reply_parameters: { message_id: Number(duel.inviteMessageId) } } : {}),
-      } as any).catch(() => undefined)
-      await answer(q, tr(lang, 'ارسال بازی ناموفق بود؛ مبلغ رزروشده آزاد شد.', 'Could not start the game; reserved funds were released.'), true)
-      return
+      const failure = tr(lang, '⚠️ فرم اختصاصی بازی ارسال نشد؛ مبالغ رزروشده آزاد شدند.', '⚠️ Private game forms could not be sent; reserved funds were released.')
+      await Promise.all([Number(duel.initiatorId), Number(duel.opponentId)].map((playerId) => sendEphemeralMessage(Number(duel.chatId), playerId, failure).catch(() => undefined)))
+      return answer(q, tr(lang, 'شروع بازی ناموفق بود؛ مبالغ آزاد شدند.', 'Could not start the game; reserved funds were released.'), true)
     }
-    await GroupDuel.updateOne({ _id: id, status: 'choosing' }, { $set: { gameMessageId: game.message_id } })
     try {
       const { scheduleGroupMatchTimeout } = await import('../services/timing')
       await Promise.all([
@@ -301,28 +293,129 @@ export async function handleCallback(update: any) {
       ])
       await GroupDuel.updateOne({ _id: id, status: 'choosing' }, { $set: { timingScheduledAt: new Date() } })
     } catch (error) {
-      // The BullMQ worker's Mongo reconciliation will restore either missing job.
       logError('match_timeout_or_reminder_schedule_failed', error, { duelId: id, deadline: fresh.deadline, reminderAt: fresh.reminderAt })
     }
-    await answer(q, tr(lang, '✅ دعوت پذیرفته شد؛ بازی شروع شد.', '✅ Invitation accepted; the game has started.'))
+    await answer(q, tr(lang, '✅ دعوت پذیرفته شد؛ فرم خصوصی بازی برای هر دو بازیکن ارسال شد.', '✅ Invitation accepted; each player received a private game form.'))
     return
+  }
+
+  if (data.startsWith('gw:cancel:')) {
+    const id = data.split(':')[2]
+    const duel = await GroupDuel.findOne({ _id: id, status: 'pending' }).lean() as any
+    if (!duel) return answer(q, tr(await callbackLang(String(msg?.chat?.id ?? '')), '⌛ دعوت دیگر فعال نیست.', '⌛ Invitation is no longer active.'), true)
+    const lang = await callbackLang(String(duel.chatId))
+    if (String(msg?.chat?.id) !== String(duel.chatId) || uid !== Number(duel.initiatorId) || Number(msg?.ephemeral_message_id) !== Number(duel.initiatorWaitEphemeralId)) return answer(q, tr(lang, '⛔ فقط دعوت‌کننده می‌تواند این دعوت را لغو کند.', '⛔ Only the challenger can cancel this invitation.'), true)
+    const session = await mongoose.startSession()
+    let cancelled: any = null
+    try {
+      await session.withTransaction(async () => {
+        cancelled = await GroupDuel.findOneAndUpdate({ _id: id, status: 'pending' }, { $set: { status: 'cancelled', outcome: 'initiator_cancelled' } }, { new: true, session }).lean() as any
+        if (cancelled && groupDuelHasStake(cancelled)) await release(cancelled.initiatorId, String(cancelled.currency), Number(cancelled.amount), `group:invite-release:${id}`, session)
+      })
+    } finally { await session.endSession() }
+    if (!cancelled) return answer(q, tr(lang, '⌛ دعوت دیگر فعال نیست.', '⌛ Invitation is no longer active.'), true)
+    if (Number(cancelled.opponentInviteEphemeralId) > 0) {
+      await deleteEphemeralMessage(Number(cancelled.chatId), Number(cancelled.opponentId), Number(cancelled.opponentInviteEphemeralId)).catch(() => undefined)
+    }
+    await editEphemeralMessage(Number(duel.chatId), uid, Number(msg.ephemeral_message_id), tr(lang, 'دعوت لغو شد و مبلغ رزروشده آزاد شد.', 'Invitation cancelled and the reserved stake was released.'), { reply_markup: { inline_keyboard: [] } }).catch(() => undefined)
+    return answer(q, tr(lang, 'دعوت لغو شد.', 'Invitation cancelled.'))
+  }
+
+  if (data.startsWith('gw:rematch:')) {
+    const parentId = data.split(':')[2]
+    const parent = await GroupDuel.findOne({ _id: parentId, status: 'settled' }).lean() as any
+    if (!parent) return answer(q, tr(await callbackLang(String(msg?.chat?.id ?? '')), 'فرصت شروع دوباره دیگر فعال نیست.', 'Rematch is no longer available.'), true)
+    const lang = await callbackLang(String(parent.chatId))
+    const ownCard = uid === Number(parent.initiatorId) ? parent.initiatorRematchEphemeralId : uid === Number(parent.opponentId) ? parent.opponentRematchEphemeralId : 0
+    if (String(msg?.chat?.id) !== String(parent.chatId) || !ownCard || Number(msg?.ephemeral_message_id) !== Number(ownCard)) return answer(q, tr(lang, '⛔ این دکمه برای شما نیست.', '⛔ This button is not yours.'), true)
+    const opponentId = uid === Number(parent.initiatorId) ? Number(parent.opponentId) : Number(parent.initiatorId)
+    const cfg = await GroupConfig.findOne({ chatId: String(parent.chatId) }).lean() as any
+    if (!cfg?.enabled) return answer(q, tr(lang, 'دوئل در این گروه غیرفعال است.', 'Duels are disabled in this group.'), true)
+    const newId = `gd_${String(parent.chatId).replace(/-/g, '').slice(-10)}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+    const inviteSeconds = Math.max(30, Math.min(300, Number(parent.mode === 'bet' ? cfg.betInviteTimeoutSeconds ?? cfg.inviteTimeoutSeconds : cfg.friendlyInviteTimeoutSeconds ?? cfg.inviteTimeoutSeconds) || 120))
+    const inviteDeadline = Date.now() + inviteSeconds * 1000
+    const rematchSession = await mongoose.startSession()
+    let created = false
+    try {
+      await rematchSession.withTransaction(async () => {
+        const lockedParent = await GroupDuel.findOneAndUpdate({ _id: parentId, status: 'settled', $or: [{ rematchDuelId: { $exists: false } }, { rematchDuelId: null }, { rematchDuelId: '' }] }, { $set: { rematchDuelId: newId } }, { new: true, session: rematchSession }).lean() as any
+        if (!lockedParent) return
+        if (groupDuelHasStake(parent)) await reserve(uid, String(parent.currency), Number(parent.amount), rematchSession)
+        await GroupDuel.create([{
+          _id: newId, chatId: String(parent.chatId), activatorId: parent.activatorId,
+          initiatorId: uid, opponentId, mode: parent.mode, currency: parent.currency,
+          amount: Number(parent.amount), status: 'pending', inviteDeadline, rematchOf: parentId,
+          p1Choice: null, p2Choice: null,
+        }], { session: rematchSession })
+        created = true
+      })
+    } catch (error: any) {
+      if (error?.message === 'INSUFFICIENT_BALANCE') return answer(q, tr(lang, 'موجودی آزاد برای شروع دوباره کافی نیست.', 'Insufficient available balance for a rematch.'), true)
+      throw error
+    } finally { await rematchSession.endSession() }
+    if (!created) return answer(q, tr(lang, 'برای این دوئل قبلاً درخواست شروع دوباره ثبت شده است.', 'A rematch invitation has already been created for this duel.'), true)
+    // The rematch control is shown on two recipient-only ephemeral reply cards.
+    // Once either player activates it, remove both cards immediately.
+    await Promise.all([
+      Number(parent.initiatorRematchEphemeralId) > 0
+        ? deleteEphemeralMessage(Number(parent.chatId), Number(parent.initiatorId), Number(parent.initiatorRematchEphemeralId)).catch(() => undefined)
+        : Promise.resolve(),
+      Number(parent.opponentRematchEphemeralId) > 0
+        ? deleteEphemeralMessage(Number(parent.chatId), Number(parent.opponentId), Number(parent.opponentRematchEphemeralId)).catch(() => undefined)
+        : Promise.resolve(),
+    ])
+    await GroupDuel.updateOne({ _id: parentId, status: 'settled' }, { $set: {
+      initiatorRematchEphemeralId: null, opponentRematchEphemeralId: null,
+    } })
+    const [requester, other] = await Promise.all([getUser(uid), getUser(opponentId)])
+    const requesterMention = mention({ id: uid, first_name: requester?.firstName, last_name: requester?.lastName, username: requester?.username }, lang)
+    const otherMention = mention({ id: opponentId, first_name: other?.firstName, last_name: other?.lastName, username: other?.username }, lang)
+    const modeLabel = parent.mode === 'bet' ? tr(lang, 'شرطی', 'bet') : tr(lang, 'دوستانه', 'friendly')
+    const stakeLine = groupDuelHasStake(parent) ? tr(lang, `\n💰 مبلغ هر بازیکن: <b>${fmt(Number(parent.amount), String(parent.currency))} ${curLabel(String(parent.currency), lang)}</b>`, `\n💰 Stake per player: <b>${fmt(Number(parent.amount), String(parent.currency))} ${curLabel(String(parent.currency), lang)}</b>`) : tr(lang, '\n🆓 بدون شرط مالی', '\n🆓 No stake')
+    const inviteMarkup = new InlineKeyboard().text(tr(lang, '✅ قبول', '✅ Accept'), `gw:accept:${newId}`).text(tr(lang, '❌ رد', '❌ Reject'), `gw:reject:${newId}`)
+    const waitMarkup = new InlineKeyboard().text(tr(lang, '❌ لغو دعوت', '❌ Cancel invitation'), `gw:cancel:${newId}`)
+    let inviteCard: any
+    let waitCard: any
+    try {
+      // Store the requester's cancel-card before the opponent gets an actionable
+      // Accept button, preventing an instant acceptance from racing this write.
+      waitCard = await sendEphemeralMessage(Number(parent.chatId), uid, tr(lang, `✅ درخواست شروع دوباره برای ${otherMention} ارسال شد.`, `✅ Rematch invitation sent to ${otherMention}.`), { parse_mode: 'HTML', reply_markup: { inline_keyboard: waitMarkup.inline_keyboard } })
+      const savedWait = await GroupDuel.updateOne({ _id: newId, status: 'pending' }, { $set: { initiatorWaitEphemeralId: Number(waitCard.ephemeral_message_id) } })
+      if (!savedWait.modifiedCount) throw new Error('REMATCH_WAIT_CARD_STATE_CHANGED')
+      inviteCard = await sendEphemeralMessage(Number(parent.chatId), opponentId, tr(lang, `🔁 <b>دعوت شروع دوباره ${modeLabel}</b>\n${requesterMention} شما (${otherMention}) را به بازی مجدد دعوت کرده است.${stakeLine}`, `🔁 <b>${modeLabel} rematch invitation</b>\n${requesterMention} invited you (${otherMention}) to play again.${stakeLine}`), { parse_mode: 'HTML', reply_markup: { inline_keyboard: inviteMarkup.inline_keyboard } })
+      const savedInvite = await GroupDuel.updateOne({ _id: newId, status: 'pending' }, { $set: { opponentInviteEphemeralId: Number(inviteCard.ephemeral_message_id) } })
+      if (!savedInvite.modifiedCount) throw new Error('REMATCH_INVITE_CARD_STATE_CHANGED')
+      await scheduleGroupInviteTimeout(newId, inviteDeadline).catch(() => undefined)
+    } catch (error) {
+      if (inviteCard?.ephemeral_message_id) await deleteEphemeralMessage(Number(parent.chatId), opponentId, Number(inviteCard.ephemeral_message_id)).catch(() => undefined)
+      if (waitCard?.ephemeral_message_id) await deleteEphemeralMessage(Number(parent.chatId), uid, Number(waitCard.ephemeral_message_id)).catch(() => undefined)
+      const rollback = await mongoose.startSession()
+      try {
+        await rollback.withTransaction(async () => {
+          const current = await GroupDuel.findOneAndUpdate({ _id: newId, status: 'pending' }, { $set: { status: 'cancelled', outcome: 'rematch_send_failed' } }, { new: true, session: rollback }).lean() as any
+          if (current && groupDuelHasStake(current)) await release(uid, String(current.currency), Number(current.amount), `group:invite-send-failed:${newId}`, rollback)
+          await GroupDuel.updateOne({ _id: parentId, rematchDuelId: newId }, { $unset: { rematchDuelId: 1 } }, { session: rollback })
+        })
+      } finally { await rollback.endSession() }
+      return answer(q, tr(lang, 'ارسال دعوت شروع دوباره ناموفق بود.', 'Could not send rematch invitation.'), true)
+    }
+    return answer(q, tr(lang, 'دعوت شروع دوباره ارسال شد.', 'Rematch invitation sent.'))
   }
 
   if (data.startsWith('gw:move:')) {
     const [, , id, choice] = data.split(':')
     if (!id || !['r', 'p', 's'].includes(String(choice))) return answer(q)
     const duel = await GroupDuel.findOne({ _id: id, status: 'choosing' }).lean() as any
-    if (!duel) {
-      const lang = await callbackLang(String(msg?.chat?.id ?? ''))
-      return answer(q, tr(lang, '⌛ این رقابت دیگر فعال نیست.', '⌛ This duel is no longer active.'), true)
-    }
+    if (!duel) return answer(q, tr(await callbackLang(String(msg?.chat?.id ?? '')), '⌛ این رقابت دیگر فعال نیست.', '⌛ This duel is no longer active.'), true)
     const lang = await callbackLang(String(duel.chatId))
     if (String(msg?.chat?.id) !== String(duel.chatId)) return answer(q, tr(lang, 'این بازی متعلق به گروه دیگری است.', 'This game belongs to another group.'), true)
-    if (uid !== Number(duel.initiatorId) && uid !== Number(duel.opponentId)) {
-      return answer(q, tr(lang, '⛔ فقط دو بازیکن این رقابت می‌توانند انتخاب کنند.', '⛔ Only the two duel players can make a choice.'), true)
-    }
+    const isP1 = uid === Number(duel.initiatorId)
+    const isP2 = uid === Number(duel.opponentId)
+    if (!isP1 && !isP2) return answer(q, tr(lang, '⛔ فقط دو بازیکن این رقابت می‌توانند انتخاب کنند.', '⛔ Only the two duel players can make a choice.'), true)
+    const ownFormId = Number(isP1 ? duel.initiatorGameEphemeralId : duel.opponentGameEphemeralId)
+    if (!ownFormId || Number(msg?.ephemeral_message_id) !== ownFormId) return answer(q, tr(lang, '⛔ این فرم انتخاب برای شما نیست یا قدیمی است.', '⛔ This choice form is not yours or is outdated.'), true)
     if (Number(duel.deadline) <= Date.now()) return answer(q, tr(lang, '⌛ مهلت انتخاب به پایان رسیده است.', '⌛ The move deadline has passed.'), true)
-    const field = uid === Number(duel.initiatorId) ? 'p1Choice' : 'p2Choice'
+    const field = isP1 ? 'p1Choice' : 'p2Choice'
     const lockKey = `gw:move-lock:${id}`
     const lockToken = `${uid}:${Date.now()}:${Math.random().toString(36).slice(2)}`
     const locked = await redis.set(lockKey, lockToken, 'PX', 10000, 'NX')
@@ -338,11 +431,9 @@ export async function handleCallback(update: any) {
         return answer(q, tr(lang, '✅ انتخاب قبلاً ثبت شده؛ هر بازیکن فقط یک بار می‌تواند انتخاب کند.', '✅ Your move is already recorded. Each player may choose only once.'), true)
       }
       const fresh = await GroupDuel.findById(id).lean() as any
-      if (fresh?.p1Choice && fresh?.p2Choice) {
-        await settleDuel(id, false)
-      } else if (fresh?.status === 'choosing') {
-        await refreshGameProgress(fresh)
-      }
+      await acknowledgePlayerChoice(fresh, uid)
+      if (fresh?.p1Choice && fresh?.p2Choice) await settleDuel(id, false)
+      else await notifyOpponentChoice(fresh, uid)
       await answer(q, tr(lang, '✅ انتخاب ثبت شد.', '✅ Your choice was recorded.'))
     } finally {
       await redis.eval("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end", 1, lockKey, lockToken).catch(() => undefined)
@@ -360,7 +451,7 @@ export async function expireInvite(id: string) {
     await session.withTransaction(async () => {
       const claimed = await GroupDuel.findOneAndUpdate(
         { _id: id, status: 'pending', inviteDeadline: { $lte: Date.now() } },
-        { $set: { status: 'expired' } }, { new: true, session },
+        { $set: { status: 'expired', outcome: 'invite_expired' } }, { new: true, session },
       ).lean() as any
       if (!claimed) return
       if (groupDuelHasStake(claimed)) await release(claimed.initiatorId, String(claimed.currency), Number(claimed.amount), `group:invite-release:${id}`, session)
@@ -368,20 +459,10 @@ export async function expireInvite(id: string) {
     })
   } finally { await session.endSession() }
   if (!duel) return
-  const lang = await callbackLang(String(duel.chatId))
   await closeInviteKeyboard(duel)
-  const [u1, u2] = await Promise.all([getUser(duel.initiatorId), getUser(duel.opponentId)])
-  const p1 = mention({ id: duel.initiatorId, first_name: u1?.firstName, last_name: u1?.lastName, username: u1?.username }, lang)
-  const p2 = mention({ id: duel.opponentId, first_name: u2?.firstName, last_name: u2?.lastName, username: u2?.username }, lang)
-  const mode = duel.mode === 'bet' ? tr(lang, 'شرطی', 'bet') : tr(lang, 'دوستانه', 'friendly')
-  const showStake = duel.mode === 'bet' && Number(duel.amount) > 0 && groupDuelHasStake(duel)
-  const stakeTextFa = showStake ? ` به مبلغ ${fmt(duel.amount, String(duel.currency))} ${curLabel(String(duel.currency), lang)}` : ' بدون شرط مالی'
-  const stakeTextEn = showStake ? ` for ${fmt(duel.amount, String(duel.currency))} ${curLabel(String(duel.currency), lang)}` : ' with no stake'
-  const text = tr(lang,
-    `⌛ مهلت دعوت ${p1} از ${p2} برای رقابت ${mode}${stakeTextFa} تمام شد و دعوت خودکار رد شد.`,
-    `⌛ ${p1}’s ${mode} duel invitation to ${p2}${stakeTextEn} expired and was automatically rejected.`,
-  )
-  await bot.api.sendMessage(Number(duel.chatId), text, {
-    parse_mode: 'HTML', ...(duel.inviteMessageId ? { reply_parameters: { message_id: Number(duel.inviteMessageId) } } : {}),
-  } as any).catch(() => undefined)
+  const lang = await callbackLang(String(duel.chatId))
+  const text = tr(lang, '⌛ مهلت دعوت تمام شد؛ مبلغ رزروشده، در صورت وجود، آزاد شد.', '⌛ The invitation expired; any reserved stake has been released.')
+  await Promise.all([Number(duel.initiatorId), Number(duel.opponentId)].map((playerId) =>
+    sendEphemeralMessage(Number(duel.chatId), playerId, text).catch(() => undefined),
+  ))
 }
