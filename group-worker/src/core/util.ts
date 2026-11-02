@@ -2,7 +2,7 @@ import { User } from './models/index'
 
 export const normalize = (s: string) => s.normalize('NFKC').replace(/[ي]/g,'ی').replace(/[ك]/g,'ک').trim().toLocaleLowerCase('en-US')
 const triggers: Record<string,string> = {
-  fight:'fight', '/fight':'fight', duel:'fight', '/duel':'fight', competition:'fight', '/competition':'fight', 'دوئل':'fight', 'فایت':'fight', 'رقابت':'fight',
+  fight:'fight', '/fight':'fight', duel:'fight', '/duel':'fight', challenge:'fight', '/challenge':'fight', competition:'fight', '/competition':'fight', 'دوئل':'fight', 'فایت':'fight', 'رقابت':'fight', 'چالش':'fight', 'چلنج':'fight',
   help:'help', '/help':'help', guide:'help', '/guide':'help', 'راهنما':'help', 'کمک':'help',
   dashboard:'dashboard', '/dashboard':'dashboard', panel:'dashboard', '/panel':'dashboard', management:'dashboard', '/management':'dashboard', 'پنل':'dashboard', 'پانل':'dashboard', 'مدیریت':'dashboard', 'داشبورد':'dashboard'
 }

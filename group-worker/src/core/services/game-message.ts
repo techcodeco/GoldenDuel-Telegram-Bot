@@ -335,18 +335,21 @@ export async function sendGroupDuelNotice(
   chatId: number | string,
   text: string,
   replyMessageId?: number,
+  replyMarkup?: any,
 ): Promise<number> {
   const options: any = { parse_mode: "HTML", disable_notification: false };
   if (replyMessageId)
     options.reply_parameters = { message_id: Number(replyMessageId) };
+  if (replyMarkup) options.reply_markup = replyMarkup;
   const sent = await bot.api.sendMessage(Number(chatId), text, options);
   const messageId = Number((sent as any)?.message_id) || 0;
   if (!messageId) throw new Error("GROUP_NOTICE_MESSAGE_ID_MISSING");
   try {
-    const saved = await GroupDuel.updateOne(
-      { _id: duelId },
-      { $addToSet: { publicNoticeMessageIds: messageId } },
-    );
+    const update: any = { $addToSet: { publicNoticeMessageIds: messageId } };
+    // A public accept button is attached only to an open challenge. Persist its
+    // message ID together with the notice ID so callbacks can validate it.
+    if (replyMarkup) update.$set = { inviteMessageId: messageId };
+    const saved = await GroupDuel.updateOne({ _id: duelId }, update);
     if (!saved.matchedCount) throw new Error("GROUP_NOTICE_DUEL_NOT_FOUND");
     return messageId;
   } catch (error) {
@@ -365,7 +368,7 @@ export async function deleteDuelPublicNotices(duel: any): Promise<void> {
   const current = duel._id
     ? ((await GroupDuel.findById(String(duel._id))
         .select(
-          "publicNoticeMessageIds gameMessageId inviteMessageId resultMessageId",
+          "publicNoticeMessageIds gameMessageId inviteMessageId resultMessageId reminderAnnouncementMessageId",
         )
         .lean()) as any)
     : null;
@@ -382,6 +385,10 @@ export async function deleteDuelPublicNotices(duel: any): Promise<void> {
           : []),
         Number(duel.gameMessageId ?? current?.gameMessageId) || 0,
         Number(duel.inviteMessageId ?? current?.inviteMessageId) || 0,
+        Number(
+          duel.reminderAnnouncementMessageId ??
+            current?.reminderAnnouncementMessageId,
+        ) || 0,
       ].filter((id) => id > 0 && id !== resultId),
     ),
   ];

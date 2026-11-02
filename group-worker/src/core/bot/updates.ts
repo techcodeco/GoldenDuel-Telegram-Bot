@@ -89,11 +89,17 @@ export async function handleUpdate(fields: Record<string, string>) {
 
   if (trigger === 'fight') {
     const reply = m.reply_to_message
-    if (!reply?.from || reply.from.is_bot || Number(reply.from.id) === Number(m.from.id)) {
+    if (!reply) {
+      // No reply target means an open group challenge: any eligible member may
+      // accept it, and the first successful callback becomes the opponent.
+      await beginFlow(chatId, m.from, undefined, Number(m.message_id))
+      return
+    }
+    if (!reply.from || reply.from.is_bot || Number(reply.from.id) === Number(m.from.id)) {
       try {
         await sendEphemeralMessage(m.chat.id, Number(m.from.id), tr(lang,
-          'برای دعوت، باید روی پیام حریف ریپلای کنی و سپس واژهٔ دوئل را بفرستی.',
-          'Reply to your opponent’s message before sending the duel trigger.',
+          'برای دعوت مستقیم، باید روی پیام یک کاربر دیگر ریپلای کنی. برای ساخت دوئل عمومی، فقط واژهٔ دوئل را بدون ریپلای بفرست.',
+          'For a direct challenge, reply to another user. To create an open duel, send the duel keyword without replying.',
         ), {}, { replyMessageId: Number(m.message_id) })
       } catch (error) {
         logError('invalid_group_challenge_notice_failed', error, { chatId, userId: m.from.id })

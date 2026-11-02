@@ -1631,27 +1631,33 @@ async function runButton(ctx: any, btn: ButtonKey): Promise<void> {
         ));
       }
       const url = `https://t.me/${me.username}?startgroup&admin=delete_messages`;
-      return void (await ctx.reply(
+      const addGroupText =
         lang === "fa"
-          ? "برای افزودن ربات به گروه، دکمهٔ زیر را بزن."
-          : "Tap below to add the bot to a group.",
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [
-                {
-                  text:
-                    lang === "fa"
-                      ? "👥 افزودن ربات به گروه"
-                      : "👥 Add bot to group",
-                  url,
-                  style: "success",
-                },
-              ],
+          ? "🎯 <b>گروهت رو به میدان دوئل و درآمد تبدیل کن!</b>\n\n" +
+            "🤝 ربات <b>دوئل طلایی</b> رو به گروهت اضافه کن تا اعضا بتونن داخل گروه با هم دوئل دوستانه یا شرطی برگزار کنن.\n\n" +
+            "💰 <b>پاداش میزبانی گروه:</b> بابت دوئل‌های شرطیِ واجد شرایط که در گروهت تکمیل می‌شن، سهم پاداش میزبان بر اساس کارمزد و درصد تعیین‌شده محاسبه می‌شه و مستقیم به موجودی کیف پولت در ربات اضافه می‌شه.\n\n" +
+            "⚡️ راه‌اندازی آسونه؛ ربات رو به گروه اضافه کن، دسترسی‌های لازم رو بده و از رقابت اعضای گروهت لذت ببر!"
+          : "🎯 <b>Turn your group into a duel arena with rewards!</b>\n\n" +
+            "🤝 Add <b>Golden Duel</b> to your group so members can play friendly or wager duels right inside the group.\n\n" +
+            "💰 <b>Group host rewards:</b> For eligible wager duels completed in your group, the host share is calculated from the fee and configured reward rate, then credited directly to your bot wallet balance.\n\n" +
+            "⚡️ Setup is simple: add the bot, grant the required permissions, and let your group enjoy the competition!";
+      return void (await ctx.reply(addGroupText, {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text:
+                  lang === "fa"
+                    ? "👥 افزودن ربات به گروه"
+                    : "👥 Add bot to group",
+                url,
+                style: "success",
+              },
             ],
-          } as any,
-        },
-      ));
+          ],
+        } as any,
+      }));
     }
     case "btn.friendly": {
       const r = await joinDuel(ctx.from!.id, "IRT", 0, "friendly");

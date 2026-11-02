@@ -2,9 +2,9 @@ import { InlineKeyboard } from 'grammy'
 import { logError } from '../logger'
 import mongoose from 'mongoose'
 import { bot } from './instance'
-import { redis, langOf, tr, curLabel, fmt, mention, getUser } from '../runtime'
+import { redis, langOf, tr, curLabel, fmt, mention, getUser, userStarted, startKeyboard } from '../runtime'
 import { GroupConfig, GroupDuel } from '../models/index'
-import { groupReminderAt, groupDuelHasStake, type GroupCurrency, type GroupMode } from '../contracts/group'
+import { groupReminderAt, groupDuelHasStake, isOpenGroupChallenge, type GroupCurrency, type GroupMode } from '../contracts/group'
 import { getFlow, reserve, release } from '../services/wallet'
 import { advanceFlow, createInvite } from '../services/duel-flow'
 import { groupLang, renderDashboard, renderTimeoutPanel } from '../services/group'
@@ -174,7 +174,7 @@ export async function handleCallback(update: any) {
       const amount = Number(parts[3])
       try {
         await createInvite(uid, flow, amount, ref)
-        await answer(q, tr(await callbackLang(flow.chatId), '✅ دعوت خصوصی ارسال شد.', '✅ Private invitation sent.'))
+        await answer(q, (flow.openChallenge === true || Number(flow.targetId) <= 0) ? tr(await callbackLang(flow.chatId), '✅ درخواست عمومی دوئل در گروه منتشر شد.', '✅ Your public group challenge has been posted.') : tr(await callbackLang(flow.chatId), '✅ دعوت خصوصی ارسال شد.', '✅ Private invitation sent.'))
       } catch (error: any) {
         const lang = await callbackLang(flow.chatId)
         const message = error?.message === 'INSUFFICIENT_BALANCE'
@@ -196,28 +196,56 @@ export async function handleCallback(update: any) {
     return
   }
 
-  if (data.startsWith('gw:accept:') || data.startsWith('gw:reject:')) {
+  if (data.startsWith('gw:accept:') || data.startsWith('gw:reject:') || data.startsWith('gw:openaccept:')) {
+    const isOpenAccept = data.startsWith('gw:openaccept:')
+    const isReject = data.startsWith('gw:reject:')
     const id = data.split(':')[2]
     if (!id) return answer(q)
     const duel = await GroupDuel.findOne({ _id: id, status: 'pending' }).lean() as any
     if (!duel) return answer(q, tr(await callbackLang(String(msg?.chat?.id ?? '')), '⌛ این دعوت دیگر فعال نیست.', '⌛ This invitation is no longer active.'), true)
     const lang = await callbackLang(String(duel.chatId))
-    if (String(msg?.chat?.id) !== String(duel.chatId) || Number(msg?.ephemeral_message_id) !== Number(duel.opponentInviteEphemeralId)) {
-      return answer(q, tr(lang, 'این دعوت خصوصی معتبر نیست.', 'This private invitation is not valid.'), true)
+    const openChallenge = isOpenGroupChallenge(duel)
+
+    if (isOpenAccept) {
+      const publicNoticeIds = Array.isArray(duel.publicNoticeMessageIds) ? duel.publicNoticeMessageIds.map(Number) : []
+      const validPublicMessage = Number(msg?.message_id) === Number(duel.inviteMessageId)
+        || publicNoticeIds.includes(Number(msg?.message_id))
+      if (!openChallenge || isReject || String(msg?.chat?.id) !== String(duel.chatId) || !validPublicMessage) {
+        return answer(q, tr(lang, 'این درخواست عمومی معتبر نیست.', 'This public challenge is not valid.'), true)
+      }
+      if (uid === Number(duel.initiatorId)) return answer(q, tr(lang, '⛔ نمی‌توانی درخواست خودت را قبول کنی.', '⛔ You cannot accept your own challenge.'), true)
+      if (q.from?.is_bot) return answer(q, tr(lang, 'ربات‌ها نمی‌توانند وارد دوئل شوند.', 'Bots cannot join duels.'), true)
+      if (!(await userStarted(uid))) {
+        const prompt = tr(lang,
+          'برای پذیرش دوئل ابتدا ربات را در پیوی Start کن و سپس دوباره دکمهٔ پذیرش را بزن.',
+          'Start the bot in private before accepting this duel, then tap Accept again.',
+        )
+        const keyboard = startKeyboard(lang)
+        await sendEphemeralMessage(Number(duel.chatId), uid, prompt, keyboard ? { reply_markup: keyboard } : {}, {
+          ...(Number(msg?.message_id) > 0 ? { replyMessageId: Number(msg.message_id) } : {}),
+        }).catch((error) => logError('open_challenge_start_prompt_failed', error, { duelId: id, userId: uid }))
+        return answer(q, tr(lang, 'ابتدا ربات را در پیوی Start کن.', 'Start the bot in private first.'), true)
+      }
+    } else {
+      if (openChallenge || String(msg?.chat?.id) !== String(duel.chatId)
+        || Number(msg?.ephemeral_message_id) !== Number(duel.opponentInviteEphemeralId)) {
+        return answer(q, tr(lang, 'این دعوت خصوصی معتبر نیست.', 'This private invitation is not valid.'), true)
+      }
+      if (uid !== Number(duel.opponentId)) return answer(q, tr(lang, '⛔ فقط بازیکن دعوت‌شده می‌تواند پاسخ دهد.', '⛔ Only the invited player can respond.'), true)
     }
-    if (uid !== Number(duel.opponentId)) return answer(q, tr(lang, '⛔ فقط بازیکن دعوت‌شده می‌تواند پاسخ دهد.', '⛔ Only the invited player can respond.'), true)
     if (Date.now() > Number(duel.inviteDeadline)) {
       await expireInvite(id)
       return answer(q, tr(lang, '⌛ مهلت این دعوت تمام شده است.', '⌛ This invitation has expired.'), true)
     }
 
-    if (data.startsWith('gw:reject:')) {
+    if (isReject) {
       const session = await mongoose.startSession()
       let rejected: any = null
       try {
         await session.withTransaction(async () => {
+          rejected = null
           rejected = await GroupDuel.findOneAndUpdate(
-            { _id: id, status: 'pending', inviteDeadline: { $gt: Date.now() } },
+            { _id: id, status: 'pending', inviteDeadline: { $gt: Date.now() }, opponentId: Number(duel.opponentId) },
             { $set: { status: 'rejected', outcome: 'opponent_rejected' } }, { new: true, session },
           ).lean() as any
           if (rejected && groupDuelHasStake(rejected)) await release(rejected.initiatorId, String(rejected.currency), Number(rejected.amount), `group:invite-release:${id}`, session)
@@ -237,26 +265,27 @@ export async function handleCallback(update: any) {
         await sendGroupDuelNotice(id, Number(rejected.chatId), notice)
       } catch (error) {
         logError('group_rejection_notice_failed', error, { duelId: id, chatId: rejected.chatId })
-        const privateNotice = tr(lang,
-          `❌ ${p2} دعوت دوئل ${p1} را رد کرد. مبلغ رزروشده، در صورت وجود، آزاد شد.`,
-          `❌ ${p2} rejected ${p1}’s duel invitation. Any reserved stake was released.`,
-        )
         await Promise.all([Number(rejected.initiatorId), Number(rejected.opponentId)].map((playerId) =>
-          sendEphemeralMessage(Number(rejected.chatId), playerId, privateNotice, { parse_mode: 'HTML' }).catch(() => undefined),
+          sendEphemeralMessage(Number(rejected.chatId), playerId, notice, { parse_mode: 'HTML' }).catch(() => undefined),
         ))
       }
       return answer(q, tr(lang, 'دعوت رد شد.', 'Invitation rejected.'))
     }
 
+    const acceptingUserId = isOpenAccept ? uid : Number(duel.opponentId)
     const session = await mongoose.startSession()
-    let accepted = false
+    let acceptedDuel: any = null
     let insufficient = false
     try {
       await session.withTransaction(async () => {
+        acceptedDuel = null
+        insufficient = false
         const current = await GroupDuel.findOne({ _id: id, status: 'pending', inviteDeadline: { $gt: Date.now() } }).session(session).lean() as any
         if (!current) return
+        if (isOpenGroupChallenge(current) && Number(current.initiatorId) === acceptingUserId) return
+        if (!isOpenGroupChallenge(current) && Number(current.opponentId) !== acceptingUserId) return
         if (groupDuelHasStake(current)) {
-          try { await reserve(current.opponentId, String(current.currency), Number(current.amount), session) }
+          try { await reserve(acceptingUserId, String(current.currency), Number(current.amount), session) }
           catch (error: any) { if (error?.message === 'INSUFFICIENT_BALANCE') { insufficient = true; return } throw error }
         }
         const cfg = await GroupConfig.findOne({ chatId: current.chatId }).session(session).lean() as any
@@ -264,39 +293,48 @@ export async function handleCallback(update: any) {
         const startedAt = Date.now()
         const deadline = startedAt + seconds * 1000
         const reminderAt = groupReminderAt(startedAt, seconds)
-        const changed = await GroupDuel.updateOne(
-          { _id: id, status: 'pending', inviteDeadline: { $gt: Date.now() } },
-          { $set: { status: 'choosing', deadline, reminderAt, reminderSent: false, p1Choice: null, p2Choice: null, gameFormsSent: false } },
-          { session },
-        )
-        if (!changed.modifiedCount) throw new Error('INVITE_RACE')
-        accepted = true
+        const filter: any = { _id: id, status: 'pending', inviteDeadline: { $gt: Date.now() } }
+        if (isOpenGroupChallenge(current)) {
+          filter.initiatorId = { $ne: acceptingUserId }
+          filter.$or = [{ opponentId: 0 }, { opponentId: null }, { opponentId: { $exists: false } }]
+        } else {
+          filter.opponentId = acceptingUserId
+        }
+        acceptedDuel = await GroupDuel.findOneAndUpdate(
+          filter,
+          { $set: { opponentId: acceptingUserId, status: 'choosing', deadline, reminderAt, reminderSent: false, p1Choice: null, p2Choice: null, gameFormsSent: false } },
+          { new: true, session },
+        ).lean() as any
+        // If the conditional claim did not win, abort the transaction so a
+        // just-reserved stake can never remain locked for a non-participant.
+        if (!acceptedDuel) throw new Error('INVITE_ACCEPT_RACE')
       })
+    } catch (error: any) {
+      if (error?.message !== 'INVITE_ACCEPT_RACE') throw error
+      acceptedDuel = null
     } finally { await session.endSession() }
     if (insufficient) return answer(q, tr(lang, '❌ موجودی آزاد کیف پولت برای این مبلغ کافی نیست.', '❌ Your available balance is insufficient for this stake.'), true)
-    if (!accepted) return answer(q, tr(lang, '⌛ دعوت دیگر فعال نیست.', '⌛ Invitation is no longer active.'), true)
+    if (!acceptedDuel) return answer(q, tr(lang, '⌛ این دوئل قبلاً پذیرفته شده یا دیگر فعال نیست.', '⌛ This duel has already been accepted or is no longer active.'), true)
 
-    await closeInviteKeyboard(duel)
-    await deleteDuelPublicNotices(duel)
-    const [acceptedBy, challenger] = await Promise.all([getUser(duel.opponentId), getUser(duel.initiatorId)])
-    const acceptedMention = mention({ id: duel.opponentId, first_name: acceptedBy?.firstName, last_name: acceptedBy?.lastName, username: acceptedBy?.username }, lang)
-    const challengerMention = mention({ id: duel.initiatorId, first_name: challenger?.firstName, last_name: challenger?.lastName, username: challenger?.username }, lang)
-    const acceptedMode = duel.mode === 'bet' ? tr(lang, 'شرطی', 'betting') : tr(lang, 'دوستانه', 'friendly')
-    const acceptedStakeFa = groupDuelHasStake(duel) ? `\n💰 مبلغ هر بازیکن: <b>${fmt(Number(duel.amount), String(duel.currency))} ${curLabel(String(duel.currency), lang)}</b>` : '\n🆓 بدون شرط مالی'
-    const acceptedStakeEn = groupDuelHasStake(duel) ? `\n💰 Stake per player: <b>${fmt(Number(duel.amount), String(duel.currency))} ${curLabel(String(duel.currency), lang)}</b>` : '\n🆓 No stake'
+    await closeInviteKeyboard(acceptedDuel)
+    await deleteDuelPublicNotices(acceptedDuel)
+    const [acceptedBy, challenger] = await Promise.all([getUser(acceptingUserId), getUser(acceptedDuel.initiatorId)])
+    const acceptedMention = mention({ id: acceptingUserId, first_name: acceptedBy?.firstName, last_name: acceptedBy?.lastName, username: acceptedBy?.username }, lang)
+    const challengerMention = mention({ id: acceptedDuel.initiatorId, first_name: challenger?.firstName, last_name: challenger?.lastName, username: challenger?.username }, lang)
+    const acceptedMode = acceptedDuel.mode === 'bet' ? tr(lang, 'شرطی', 'betting') : tr(lang, 'دوستانه', 'friendly')
+    const acceptedStakeFa = groupDuelHasStake(acceptedDuel) ? `\n💰 مبلغ هر بازیکن: <b>${fmt(Number(acceptedDuel.amount), String(acceptedDuel.currency))} ${curLabel(String(acceptedDuel.currency), lang)}</b>` : '\n🆓 بدون شرط مالی'
+    const acceptedStakeEn = groupDuelHasStake(acceptedDuel) ? `\n💰 Stake per player: <b>${fmt(Number(acceptedDuel.amount), String(acceptedDuel.currency))} ${curLabel(String(acceptedDuel.currency), lang)}</b>` : '\n🆓 No stake'
     let acceptedNoticeId = 0
     try {
-      acceptedNoticeId = await sendGroupDuelNotice(id, Number(duel.chatId), tr(lang,
+      acceptedNoticeId = await sendGroupDuelNotice(id, Number(acceptedDuel.chatId), tr(lang,
         `✅ ${acceptedMention} دعوت ${challengerMention} را پذیرفت. رقابت ${acceptedMode} آغاز می‌شود.${acceptedStakeFa}`,
         `✅ ${acceptedMention} accepted ${challengerMention}’s ${acceptedMode} duel invitation. The game is starting.${acceptedStakeEn}`,
       ))
     } catch (error) {
-      logError('group_acceptance_notice_failed', error, { duelId: id, chatId: duel.chatId })
+      logError('group_acceptance_notice_failed', error, { duelId: id, chatId: acceptedDuel.chatId })
     }
     if (!acceptedNoticeId) {
-      // The accepted status must be visible in the group before private move
-      // forms are delivered. If Telegram cannot publish it, refund both players
-      // and stop instead of starting an invisible/ambiguous duel.
+      // The accepted status must be visible before private move forms are delivered.
       const rollback = await mongoose.startSession()
       try {
         await rollback.withTransaction(async () => {
@@ -320,8 +358,8 @@ export async function handleCallback(update: any) {
         '⚠️ اعلام عمومی شروع دوئل در گروه انجام نشد؛ بازی آغاز نشد و مبالغ رزروشده آزاد شدند.',
         '⚠️ The duel start announcement could not be posted; the game was not started and reserved funds were released.',
       )
-      await Promise.all([Number(duel.initiatorId), Number(duel.opponentId)].map((playerId) =>
-        sendEphemeralMessage(Number(duel.chatId), playerId, failure).catch(() => undefined),
+      await Promise.all([Number(acceptedDuel.initiatorId), Number(acceptingUserId)].map((playerId) =>
+        sendEphemeralMessage(Number(acceptedDuel.chatId), playerId, failure).catch(() => undefined),
       ))
       return answer(q, tr(lang, 'اعلام شروع دوئل ارسال نشد؛ مبالغ آزاد شدند.', 'The duel announcement failed; reserved funds were released.'), true)
     }
@@ -343,7 +381,7 @@ export async function handleCallback(update: any) {
       const failedState = await GroupDuel.findById(id).lean() as any
       if (failedState) await deleteDuelPublicNotices(failedState)
       const failure = tr(lang, '⚠️ فرم اختصاصی بازی ارسال نشد؛ مبالغ رزروشده آزاد شدند.', '⚠️ Private game forms could not be sent; reserved funds were released.')
-      await Promise.all([Number(duel.initiatorId), Number(duel.opponentId)].map((playerId) => sendEphemeralMessage(Number(duel.chatId), playerId, failure).catch(() => undefined)))
+      await Promise.all([Number(acceptedDuel.initiatorId), Number(acceptingUserId)].map((playerId) => sendEphemeralMessage(Number(acceptedDuel.chatId), playerId, failure).catch(() => undefined)))
       return answer(q, tr(lang, 'شروع بازی ناموفق بود؛ مبالغ آزاد شدند.', 'Could not start the game; reserved funds were released.'), true)
     }
     try {
@@ -515,6 +553,7 @@ export async function expireInvite(id: string) {
   let duel: any = null
   try {
     await session.withTransaction(async () => {
+      duel = null
       const claimed = await GroupDuel.findOneAndUpdate(
         { _id: id, status: 'pending', inviteDeadline: { $lte: Date.now() } },
         { $set: { status: 'expired', outcome: 'invite_expired' } }, { new: true, session },
@@ -527,6 +566,9 @@ export async function expireInvite(id: string) {
   if (!duel) return
   await closeInviteKeyboard(duel)
   await deleteDuelPublicNotices(duel)
+  // Open challenges expire silently after removing the public accept post and
+  // the creator's private cancel card; there is no preselected opponent to mention.
+  if (isOpenGroupChallenge(duel)) return
   const lang = await callbackLang(String(duel.chatId))
   const [a, b] = await Promise.all([getUser(duel.initiatorId), getUser(duel.opponentId)])
   const p1 = mention({ id: duel.initiatorId, first_name: a?.firstName, last_name: a?.lastName, username: a?.username }, lang)

@@ -439,7 +439,7 @@ export const GroupConfig = model('GroupConfig', new Schema({
   inviteTimeoutSeconds: Number, betInviteTimeoutSeconds: Number, friendlyInviteTimeoutSeconds: Number, betTimeoutSeconds: Number, friendlyTimeoutSeconds: Number, enabled: Boolean,
 }, { timestamps: true, versionKey: false, strict: false }))
 export const GroupDuel = model('GroupDuel', new Schema({
-  _id: String, chatId: { type: String, index: true }, activatorId: Number, initiatorId: Number, opponentId: Number,
+  _id: String, chatId: { type: String, index: true }, activatorId: Number, initiatorId: Number, opponentId: Number, openChallenge: { type: Boolean, default: false },
   currency: String, amount: Number, mode: String, status: { type: String, index: true }, inviteDeadline: Number,
   deadline: Number, reminderAt: Number, reminderSent: { type: Boolean, default: false }, reminderProcessingAt: Date, p1Choice: String, p2Choice: String, outcome: String, winnerId: Number, fee: Number, payout1: Number, payout2: Number, reward: Number,
   rewardPaid: Boolean, timeoutSettled: { type: Boolean, default: false }, timeoutResultSentAt: Date, rewardPercent: Number, settledAt: Date, inviteMessageId: Number, gameMessageId: Number, timingScheduledAt: Date,

@@ -12,6 +12,8 @@ export interface GroupFlow {
   targetId: number
   targetName: string
   targetUsername: string
+  /** True when the duel is posted publicly for any eligible group member to accept. */
+  openChallenge?: boolean
   mode: GroupMode | null
   currency: GroupCurrency | null
   step: 'mode' | 'currency' | 'amount'
@@ -46,4 +48,12 @@ export function groupDuelHasStake(duel: { mode?: unknown; currency?: unknown; am
   return duel.mode === 'friendly'
     && Number(duel.amount) > 0
     && (duel.currency === 'IRT' || duel.currency === 'TON')
+}
+
+
+/** Open group challenges have no preselected opponent until the first valid acceptance. */
+export function isOpenGroupChallenge(duel: { openChallenge?: unknown; opponentId?: unknown }): boolean {
+  // Once an opponent ID is assigned, the request is no longer waiting for a
+  // public acceptor even though the original openChallenge flag remains true.
+  return Number(duel.opponentId ?? 0) <= 0
 }
