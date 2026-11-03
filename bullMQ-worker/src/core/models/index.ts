@@ -444,7 +444,7 @@ export const GroupDuel = model('GroupDuel', new Schema({
   deadline: Number, reminderAt: Number, reminderSent: { type: Boolean, default: false }, reminderProcessingAt: Date, p1Choice: String, p2Choice: String, outcome: String, winnerId: Number, fee: Number, payout1: Number, payout2: Number, reward: Number,
   rewardPaid: Boolean, timeoutSettled: { type: Boolean, default: false }, timeoutResultSentAt: Date, rewardPercent: Number, settledAt: Date, inviteMessageId: Number, gameMessageId: Number, timingScheduledAt: Date,
   triggerMessageId: Number, opponentInviteEphemeralId: Number, initiatorWaitEphemeralId: Number,
-  initiatorGameEphemeralId: Number, opponentGameEphemeralId: Number, initiatorRematchEphemeralId: Number,
+  initiatorGameEphemeralId: Number, opponentGameEphemeralId: Number, initiatorReminderEphemeralId: Number, opponentReminderEphemeralId: Number, initiatorRematchEphemeralId: Number,
   opponentRematchEphemeralId: Number, gameFormsSent: { type: Boolean, default: false }, rematchFormsSent: { type: Boolean, default: false }, resultMessageId: Number,
   rematchOf: { type: String, index: true }, rematchDuelId: String, lifecycleVersion: Number, publicNoticeMessageIds: { type: [Number], default: [] }, reminderAnnouncementMessageId: Number,
 }, { timestamps: true, versionKey: false, strict: false }))

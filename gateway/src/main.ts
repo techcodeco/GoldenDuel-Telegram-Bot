@@ -1,16 +1,35 @@
+import { timingSafeEqual } from "node:crypto";
 import { Elysia } from "elysia";
 import {
+  HOST,
   MAXLEN_GROUPS,
   MAXLEN_PRIVATE,
   PORT,
   REUSE_PORT,
   STREAM_PRIVATE,
-  WEBHOOK_TOKEN,
+  WEBHOOK_SECRET,
 } from "./config";
 import { route } from "./filter";
 import { flushLogs, logError, startLogJanitor } from "./logger";
 import { redis } from "./redis";
 import { startServerTelemetry } from "./telemetry";
+
+if (!/^[A-Za-z0-9_-]{1,256}$/.test(WEBHOOK_SECRET)) {
+  throw new Error(
+    "WEBHOOK_SECRET must be 1-256 characters and contain only A-Z, a-z, 0-9, _ or -",
+  );
+}
+
+function isValidWebhookSecret(received: string | null): boolean {
+  if (!received) return false;
+
+  const expectedBytes = Buffer.from(WEBHOOK_SECRET, "utf8");
+  const receivedBytes = Buffer.from(received, "utf8");
+  return (
+    expectedBytes.length === receivedBytes.length &&
+    timingSafeEqual(expectedBytes, receivedBytes)
+  );
+}
 
 startLogJanitor();
 
@@ -40,10 +59,13 @@ const app = new Elysia()
     }
   })
   .post(
-    "/webhook/:token",
-    async ({ params, request, set }) => {
-      if (params.token !== WEBHOOK_TOKEN) {
-        logError("webhook_bad_token", "request with wrong token"); // helps spot a misconfigured setWebhook
+    "/webhook",
+    async ({ request, set }) => {
+      // Telegram sends this header after secret_token is configured with setWebhook.
+      if (!isValidWebhookSecret(
+        request.headers.get("x-telegram-bot-api-secret-token"),
+      )) {
+        logError("webhook_invalid_secret_header", "missing or invalid Telegram webhook secret header");
         set.status = 401;
         return "unauthorized";
       }
@@ -85,9 +107,9 @@ const app = new Elysia()
     },
     { parse: "none" }, // manual parse, no schema validation on the hot path
   )
-  .listen({ port: PORT, reusePort: REUSE_PORT });
+  .listen({ hostname: HOST, port: PORT, reusePort: REUSE_PORT });
 
-console.log(`gateway listening on :${PORT}`);
+console.log(`gateway listening on ${HOST}:${PORT}`);
 
 // Graceful shutdown: finish in-flight requests, flush logs, close Redis
 for (const sig of ["SIGINT", "SIGTERM"] as const) {

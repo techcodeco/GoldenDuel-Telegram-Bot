@@ -33,14 +33,13 @@ const GROUP_WORDS = new Set([
   "پانل",
   "مدیریت",
   "داشبورد",
-  "challenge",
-  "/challenge",
-  "چالنج",
-  "/چالنج",
 ]);
 
 /** Only exact whole-message keywords enter the group stream; ordinary group chat is dropped. */
-export function isGroupTrigger(text: string | undefined): boolean {
+export function isGroupTrigger(
+  text: string | undefined,
+  isReply = false,
+): boolean {
   if (!text) return false;
   let s = norm(text);
   if (s.startsWith("/")) {
@@ -52,8 +51,21 @@ export function isGroupTrigger(text: string | undefined): boolean {
       s = s.slice(0, at);
     }
   }
-
-  return GROUP_WORDS.has(s);
+  const command = GROUP_WORDS.has(s);
+  if (!command) return false;
+  // Fight words are only meaningful as a reply to another member; help/panel can be standalone.
+  const fight = new Set([
+    "fight",
+    "/fight",
+    "duel",
+    "/duel",
+    "competition",
+    "/competition",
+    "دوئل",
+    "فایت",
+    "رقابت",
+  ]).has(s);
+  return !fight || isReply;
 }
 
 // Returns target stream, or null to drop the update.
@@ -74,7 +86,10 @@ export function route(u: any): string | null {
   if (m) {
     const t = m.chat?.type;
     if (t === "private") return STREAM_PRIVATE;
-    if ((t === "group" || t === "supergroup") && isGroupTrigger(m.text))
+    if (
+      (t === "group" || t === "supergroup") &&
+      isGroupTrigger(m.text, Boolean(m.reply_to_message))
+    )
       return STREAM_GROUPS;
     return null;
   }
