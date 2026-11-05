@@ -3,6 +3,8 @@ export const en = {
     "🌍 <b>Welcome!</b>\nChoose the language you would like to use with the bot:",
   "lang.fa": "🇮🇷 فارسی",
   "lang.en": "🇬🇧 English",
+  "lang.ar": "🇸🇦 العربية",
+  "lang.es": "🇪🇸 Español",
   welcome:
     "👋 Welcome <b>{name}</b>!\n\nChallenge other players to Rock · Paper · Scissors duels and win real rewards.\nUse the menu below to get started.",
   "menu.hint": "Choose an option from the menu 👇",

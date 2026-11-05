@@ -30,7 +30,7 @@ async function getOwners(): Promise<Owner[]> {
     const dbOwners = await User.find({ role: 'owner' }).select('tgId lang').lean() as Array<{ tgId: unknown; lang?: string }>
     for (const row of dbOwners) {
       const id = Number(row.tgId)
-      if (Number.isSafeInteger(id) && id > 0) map.set(id, { id, lang: row.lang === 'en' ? 'en' : 'fa' })
+      if (Number.isSafeInteger(id) && id > 0) map.set(id, { id, lang: ['fa', 'en', 'ar', 'es'].includes(row.lang ?? '') ? row.lang! : 'fa' })
     }
   } catch (error) {
     logError('backup_watchdog_owner_lookup_failed', error)
@@ -61,17 +61,18 @@ async function backupWorkerHeartbeat(redis: Redis): Promise<{ online: boolean; s
 
 async function notifyOwner(owner: Owner, next: HealthTransition): Promise<boolean> {
   const down = next === 'down'
-  const text = down
-    ? owner.lang === 'en'
-      ? '🚨 <b>Backup worker is offline</b>\n\nNo fresh heartbeat has been received from <code>backup-worker</code>. Please check its process, Redis/MongoDB connection, MongoDB Database Tools and logs, then restart it.'
-      : '🚨 <b>ورکر بکاپ خاموش یا قطع شده است</b>\n\nاز <code>backup-worker</code> ضربان سلامت تازه‌ای دریافت نشده است. لطفاً وضعیت پردازش، اتصال Redis و MongoDB، نصب MongoDB Database Tools و لاگ‌ها را بررسی و در صورت نیاز ورکر را دوباره روشن کنید.'
-    : owner.lang === 'en'
-      ? '✅ <b>Backup worker is online again</b>\n\nA fresh heartbeat was received from <code>backup-worker</code>.'
-      : '✅ <b>ورکر بکاپ دوباره آنلاین شد</b>\n\nضربان سلامت جدید از <code>backup-worker</code> دریافت شد.'
+  const language = (['fa', 'en', 'ar', 'es'].includes(owner.lang) ? owner.lang : 'fa') as 'fa' | 'en' | 'ar' | 'es'
+  const messages = {
+    fa: { down: '🚨 <b>ورکر بکاپ خاموش یا قطع شده است</b>\n\nاز <code>backup-worker</code> ضربان سلامت تازه‌ای دریافت نشده است. لطفاً وضعیت پردازش، اتصال Redis و MongoDB، نصب MongoDB Database Tools و لاگ‌ها را بررسی کنید.', online: '✅ <b>ورکر بکاپ دوباره آنلاین شد</b>\n\nضربان سلامت جدید از <code>backup-worker</code> دریافت شد.', button: '🗄 مدیریت بکاپ‌ها' },
+    en: { down: '🚨 <b>Backup worker is offline</b>\n\nNo fresh heartbeat has been received from <code>backup-worker</code>. Check the process, Redis/MongoDB connections, MongoDB Database Tools, and logs.', online: '✅ <b>Backup worker is online again</b>\n\nA fresh heartbeat was received from <code>backup-worker</code>.', button: '🗄 Backup management' },
+    ar: { down: '🚨 <b>عامل النسخ الاحتياطي غير متصل</b>\n\nلم يتم استلام إشارة حياة حديثة من <code>backup-worker</code>. تحقق من العملية واتصالات Redis وMongoDB وأدوات MongoDB وسجلات التشغيل.', online: '✅ <b>عاد عامل النسخ الاحتياطي إلى الاتصال</b>\n\nتم استلام إشارة حياة حديثة من <code>backup-worker</code>.', button: '🗄 إدارة النسخ الاحتياطي' },
+    es: { down: '🚨 <b>El worker de copias de seguridad está desconectado</b>\n\nNo se ha recibido una señal reciente de <code>backup-worker</code>. Comprueba el proceso, las conexiones de Redis y MongoDB, las herramientas de MongoDB y los registros.', online: '✅ <b>El worker de copias de seguridad vuelve a estar conectado</b>\n\nSe ha recibido una señal reciente de <code>backup-worker</code>.', button: '🗄 Gestión de copias' },
+  }[language]
+  const text = down ? messages.down : messages.online
   try {
     await bot.api.sendMessage(owner.id, text, {
       parse_mode: 'HTML',
-      reply_markup: { inline_keyboard: [[{ text: owner.lang === 'en' ? '🗄 Backup management' : '🗄 مدیریت بکاپ‌ها', callback_data: 'admin:backups', style: down ? 'danger' : 'primary' }]] },
+      reply_markup: { inline_keyboard: [[{ text: messages.button, callback_data: 'admin:backups', style: down ? 'danger' : 'primary' }]] },
     } as any)
     return true
   } catch (error) {

@@ -1,4 +1,4 @@
-export type GroupLanguage = 'fa' | 'en'
+export type GroupLanguage = 'fa' | 'en' | 'ar' | 'es'
 export type GroupCurrency = 'IRT' | 'TON'
 export type GroupMode = 'bet' | 'friendly'
 export type DuelChoice = 'r' | 'p' | 's'

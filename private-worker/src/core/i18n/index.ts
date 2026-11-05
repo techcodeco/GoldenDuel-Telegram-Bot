@@ -1,11 +1,13 @@
 import { en, type Key } from './en'
 import { fa } from './fa'
+import { ar } from './ar'
+import { es } from './es'
 
-export type Lang = 'fa' | 'en'
-export const LANGS: readonly Lang[] = ['fa', 'en']
+export type Lang = 'fa' | 'en' | 'ar' | 'es'
+export const LANGS: readonly Lang[] = ['fa', 'en', 'ar', 'es']
 export type { Key }
 
-const dict: Record<Lang, Record<Key, string>> = { en, fa }
+const dict: Record<Lang, Record<Key, string>> = { en, fa, ar, es }
 
 export function t(lang: Lang, key: Key, params?: Record<string, string | number>): string {
   const s = dict[lang][key] ?? dict.en[key]
@@ -41,7 +43,8 @@ for (const lang of LANGS) for (const k of BUTTON_KEYS) buttonLookup.set(dict[lan
 export const matchButton = (text: string): ButtonKey | undefined => buttonLookup.get(text)
 
 export const languageFromText = (text: string): Lang | undefined => {
-  if (text === dict.en['lang.fa'] || text === dict.fa['lang.fa']) return 'fa'
-  if (text === dict.en['lang.en'] || text === dict.fa['lang.en']) return 'en'
+  for (const lang of LANGS) if (text === dict.en[`lang.${lang}` as Key] || text === dict.fa[`lang.${lang}` as Key] || text === dict.ar[`lang.${lang}` as Key] || text === dict.es[`lang.${lang}` as Key]) return lang
   return undefined
 }
+
+export { text4 } from './labels'

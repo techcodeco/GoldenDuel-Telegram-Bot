@@ -113,7 +113,7 @@ export async function recordDeliveryResult(
   campaignId: string,
   targetType: 'user' | 'group',
   targetId: string,
-  status: 'sent' | 'failed',
+  status: 'sent' | 'failed' | 'unknown',
   error = '',
 ) {
   await BroadcastDelivery.updateOne(
@@ -127,14 +127,16 @@ export async function summarizeCampaignDeliveries(campaignId: string) {
     { $match: { campaignId } },
     { $group: { _id: { targetType: '$targetType', status: '$status' }, count: { $sum: 1 } } },
   ])
-  const summary = { sentUsers: 0, failedUsers: 0, sentGroups: 0, failedGroups: 0 }
+  const summary = { sentUsers: 0, failedUsers: 0, unknownUsers: 0, sentGroups: 0, failedGroups: 0, unknownGroups: 0 }
   for (const row of rows) {
     const type = row._id.targetType
     const status = row._id.status
     if (type === 'user' && status === 'sent') summary.sentUsers += row.count
     else if (type === 'user' && status === 'failed') summary.failedUsers += row.count
+    else if (type === 'user' && status === 'unknown') summary.unknownUsers += row.count
     else if (type === 'group' && status === 'sent') summary.sentGroups += row.count
     else if (type === 'group' && status === 'failed') summary.failedGroups += row.count
+    else if (type === 'group' && status === 'unknown') summary.unknownGroups += row.count
   }
   return summary
 }

@@ -70,7 +70,7 @@ export async function payReferral(userId: number): Promise<void> {
       inviterId: inviter.tgId,
       currency,
       reward,
-      lang: inviter.lang === "fa" ? ("fa" as const) : ("en" as const),
+      lang: inviter.lang === "fa" || inviter.lang === "en" || inviter.lang === "ar" || inviter.lang === "es" ? inviter.lang : ("en" as const),
     };
   });
 

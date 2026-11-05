@@ -176,20 +176,49 @@ async function cleanupPrivateGroupCards(duel: any): Promise<void> {
   }
 }
 
-type Lang = "fa" | "en";
+type Lang = "fa" | "en" | "ar" | "es";
 const fmt = (n: number, c: string) =>
   c === "TON"
     ? (n / 1e9).toLocaleString("en-US", { maximumFractionDigits: 9 })
     : Math.round(n).toLocaleString("en-US");
 const label = (c: string, lang: Lang) =>
-  c === "IRT" ? (lang === "fa" ? "تومان" : "Toman") : "TON";
+  c === "IRT"
+    ? lang === "fa" || lang === "ar"
+      ? "تومان"
+      : "Toman"
+    : lang === "ar"
+      ? "تون (گرام)"
+      : "TON (Gram)";
 const esc = (s: unknown) =>
   String(s ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
-const tr = (lang: Lang, fa: string, en: string) => (lang === "fa" ? fa : en);
-const langOf = (v: unknown): Lang => (v === "en" ? "en" : "fa");
+const groupText: Record<string, { ar: string; es: string }> = {
+  Rock: { ar: "حجر", es: "Piedra" },
+  Paper: { ar: "ورقة", es: "Papel" },
+  Scissors: { ar: "مقص", es: "Tijeras" },
+  Player: { ar: "لاعب", es: "Jugador" },
+  "No move": { ar: "بدون اختيار", es: "Sin movimiento" },
+  "🔁 Rematch": { ar: "🔁 إعادة التحدي", es: "🔁 Revancha" },
+  "Telegram group": { ar: "مجموعة تيليجرام", es: "Grupo de Telegram" },
+  bet: { ar: "برهان", es: "con apuesta" },
+  friendly: { ar: "ودي", es: "amistoso" },
+  "🤝 <b>The result is a draw.</b>": {
+    ar: "🤝 <b>انتهت المباراة بالتعادل.</b>",
+    es: "🤝 <b>El resultado es un empate.</b>",
+  },
+};
+const tr = (lang: Lang, fa: string, en: string, ar?: string, es?: string) =>
+  lang === "fa"
+    ? fa
+    : lang === "ar"
+      ? (ar ?? groupText[en]?.ar ?? en)
+      : lang === "es"
+        ? (es ?? groupText[en]?.es ?? en)
+        : en;
+const langOf = (v: unknown): Lang =>
+  v === "en" || v === "ar" || v === "es" ? v : "fa";
 const mention = (id: number, u: any, lang: Lang) => {
   const displayName =
     [u?.firstName, u?.lastName].filter(Boolean).join(" ") ||
@@ -1139,11 +1168,15 @@ export async function processGroupMatchTimeout(
           lang,
           "⚠️ بازی به‌دلیل ارسال‌نشدن فرم‌های خصوصی لغو شد؛ مبالغ رزروشده آزاد شدند.",
           "⚠️ The duel was cancelled because private forms could not be delivered; reserved funds were released.",
+          "⚠️ أُلغي التحدي لتعذّر إرسال النماذج الخاصة؛ وتم تحرير الأموال المحجوزة.",
+          "⚠️ Se canceló el duelo porque no se pudieron entregar los formularios privados; se liberaron los fondos reservados.",
         )
       : tr(
           lang,
           "⚠️ رقابت دوستانه به‌دلیل ارسال‌نشدن فرم‌های خصوصی لغو شد.",
           "⚠️ The friendly duel was cancelled because private forms could not be delivered.",
+          "⚠️ أُلغي التحدي الودي لتعذّر إرسال النماذج الخاصة.",
+          "⚠️ Se canceló el duelo amistoso porque no se pudieron entregar los formularios privados.",
         );
     await Promise.all(
       [Number(result.initiatorId), Number(result.opponentId)].map((uid) =>
@@ -1191,12 +1224,21 @@ export async function processGroupMatchTimeout(
         lang,
         `🏆 <b>برنده:</b> ${winner}\n💔 <b>بازنده:</b> ${loser}`,
         `🏆 <b>Winner:</b> ${winner}\n💔 <b>Loser:</b> ${loser}`,
+        `🏆 <b>الفائز:</b> ${winner}\n💔 <b>الخاسر:</b> ${loser}`,
+        `🏆 <b>Ganador:</b> ${winner}\n💔 <b>Perdedor:</b> ${loser}`,
       )
-    : tr(lang, "🤝 <b>نتیجه مساوی شد.</b>", "🤝 <b>The result is a draw.</b>");
-  const mode =
-    result.mode === "friendly"
-      ? tr(lang, "دوستانه", "friendly")
-      : tr(lang, "شرطی", "bet");
+    : tr(
+        lang,
+        "🤝 <b>نتیجه مساوی شد.</b>",
+        "🤝 <b>The result is a draw.</b>",
+        "🤝 <b>انتهت المباراة بالتعادل.</b>",
+        "🤝 <b>El resultado es un empate.</b>",
+      );
+  const isFriendly = result.mode === "friendly";
+  const modeFa = isFriendly ? "دوستانه" : "شرطی";
+  const modeEn = isFriendly ? "friendly" : "bet";
+  const modeAr = isFriendly ? "ودي" : "برهان";
+  const modeEs = isFriendly ? "amistoso" : "con apuesta";
   const showStake = duelHasStake(result);
   const winnerPayout =
     result.winnerId === Number(result.initiatorId)
@@ -1204,38 +1246,72 @@ export async function processGroupMatchTimeout(
       : result.winnerId === Number(result.opponentId)
         ? Number(result.payout2)
         : Number(result.payout1);
-  const activatorRewardFa =
+  const amount = fmt(Number(result.amount), String(result.currency));
+  const totalAmount = fmt(2 * Number(result.amount), String(result.currency));
+  const feeAmount = fmt(Number(result.fee), String(result.currency));
+  const payoutAmount = fmt(winnerPayout, String(result.currency));
+  const rewardAmount = fmt(Number(result.reward), String(result.currency));
+  const currency = label(String(result.currency), lang);
+  const rewardFa =
     Number(result.reward) > 0
-      ? `\n🎁 <b>پاداش فعال‌کننده:</b> ${fmt(Number(result.reward), String(result.currency))} ${label(String(result.currency), lang)}`
+      ? `\n🎁 <b>پاداش فعال‌کننده:</b> ${rewardAmount} ${currency}`
       : "";
-  const activatorRewardEn =
+  const rewardEn =
     Number(result.reward) > 0
-      ? `\n🎁 <b>Activator reward:</b> ${fmt(Number(result.reward), String(result.currency))} ${label(String(result.currency), lang)}`
+      ? `\n🎁 <b>Activator reward:</b> ${rewardAmount} ${currency}`
       : "";
-  const moneySummaryFa = showStake
-    ? `\n💰 <b>مبلغ هر بازیکن:</b> ${fmt(Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🏦 <b>مجموع مبلغ رقابت:</b> ${fmt(2 * Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🧾 <b>کارمزد:</b> ${fmt(Number(result.fee), String(result.currency))} ${label(String(result.currency), lang)}\n💵 <b>دریافتی برنده / هر نفر در مساوی:</b> ${fmt(winnerPayout, String(result.currency))} ${label(String(result.currency), lang)}${activatorRewardFa}`
+  const rewardAr =
+    Number(result.reward) > 0
+      ? `\n🎁 <b>مكافأة مُفعّل المجموعة:</b> ${rewardAmount} ${currency}`
+      : "";
+  const rewardEs =
+    Number(result.reward) > 0
+      ? `\n🎁 <b>Recompensa del activador:</b> ${rewardAmount} ${currency}`
+      : "";
+  const moneyFa = showStake
+    ? `\n💰 <b>مبلغ هر بازیکن:</b> ${amount} ${currency}\n🏦 <b>مجموع مبلغ رقابت:</b> ${totalAmount} ${currency}\n🧾 <b>کارمزد:</b> ${feeAmount} ${currency}\n💵 <b>دریافتی برنده / هر نفر در مساوی:</b> ${payoutAmount} ${currency}${rewardFa}`
     : "\n🆓 رقابت دوستانه بدون شرط مالی بود.";
-  const moneySummaryEn = showStake
-    ? `\n💰 <b>Stake per player:</b> ${fmt(Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🏦 <b>Total duel stake:</b> ${fmt(2 * Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🧾 <b>Fee:</b> ${fmt(Number(result.fee), String(result.currency))} ${label(String(result.currency), lang)}\n💵 <b>Winner payout / each draw payout:</b> ${fmt(winnerPayout, String(result.currency))} ${label(String(result.currency), lang)}${activatorRewardEn}`
+  const moneyEn = showStake
+    ? `\n💰 <b>Stake per player:</b> ${amount} ${currency}\n🏦 <b>Total duel stake:</b> ${totalAmount} ${currency}\n🧾 <b>Fee:</b> ${feeAmount} ${currency}\n💵 <b>Winner payout / each draw payout:</b> ${payoutAmount} ${currency}${rewardEn}`
     : "\n🆓 This friendly duel had no stake.";
-  const timeoutLine =
+  const moneyAr = showStake
+    ? `\n💰 <b>الرهان لكل لاعب:</b> ${amount} ${currency}\n🏦 <b>إجمالي الرهان:</b> ${totalAmount} ${currency}\n🧾 <b>الرسوم:</b> ${feeAmount} ${currency}\n💵 <b>مبلغ الفائز / حصة كل لاعب عند التعادل:</b> ${payoutAmount} ${currency}${rewardAr}`
+    : "\n🆓 كان هذا تحدياً ودياً بلا رهان.";
+  const moneyEs = showStake
+    ? `\n💰 <b>Apuesta por jugador:</b> ${amount} ${currency}\n🏦 <b>Apuesta total:</b> ${totalAmount} ${currency}\n🧾 <b>Comisión:</b> ${feeAmount} ${currency}\n💵 <b>Pago al ganador / a cada jugador en empate:</b> ${payoutAmount} ${currency}${rewardEs}`
+    : "\n🆓 Este duelo amistoso no tenía apuesta.";
+  const timeoutOutcome =
     result.outcome === "draw_timeout" && !result.p1Choice && !result.p2Choice
+      ? "draw"
+      : result.outcome === "win_timeout"
+        ? "win"
+        : "none";
+  const timeoutLine =
+    timeoutOutcome === "draw"
       ? tr(
           lang,
           "\n⌛ مهلت تمام شد و هیچ‌یک از بازیکنان انتخابی ثبت نکرد؛ رقابت مساوی شد.",
           "\n⌛ Time ran out before either player chose; the duel is a draw.",
+          "\n⌛ انتهت المهلة قبل أن يختار أي لاعب؛ والتحدي تعادل.",
+          "\n⌛ Se agotó el tiempo antes de que eligiera ningún jugador; el duelo termina en empate.",
         )
-      : result.outcome === "win_timeout"
+      : timeoutOutcome === "win"
         ? tr(
             lang,
             "\n⌛ مهلت تمام شد؛ بازیکنی که انتخابش را ثبت کرده بود برنده شد.",
             "\n⌛ Time ran out; the player who submitted a move wins.",
+            "\n⌛ انتهت المهلة؛ يفوز اللاعب الذي سجّل اختياره.",
+            "\n⌛ Se agotó el tiempo; gana el jugador que registró su movimiento.",
           )
         : "";
+  const choice1 = choiceName(result.p1Choice, lang);
+  const choice2 = choiceName(result.p2Choice, lang);
   const resultText = tr(
     lang,
-    `🏁 <b>پایان رقابت ${mode}</b>${timeoutLine}\n${resultLine}\n🎮 <b>انتخاب‌ها:</b> ${p1}: ${choiceName(result.p1Choice, lang)} · ${p2}: ${choiceName(result.p2Choice, lang)}${moneySummaryFa}`,
-    `🏁 <b>${mode} duel finished</b>${timeoutLine}\n${resultLine}\n🎮 <b>Moves:</b> ${p1}: ${choiceName(result.p1Choice, lang)} · ${p2}: ${choiceName(result.p2Choice, lang)}${moneySummaryEn}`,
+    `🏁 <b>پایان رقابت ${modeFa}</b>${timeoutLine}\n${resultLine}\n🎮 <b>انتخاب‌ها:</b> ${p1}: ${choice1} · ${p2}: ${choice2}${moneyFa}`,
+    `🏁 <b>${modeEn} duel finished</b>${timeoutLine}\n${resultLine}\n🎮 <b>Moves:</b> ${p1}: ${choice1} · ${p2}: ${choice2}${moneyEn}`,
+    `🏁 <b>انتهى التحدي ${modeAr}</b>${timeoutLine}\n${resultLine}\n🎮 <b>الاختيارات:</b> ${p1}: ${choice1} · ${p2}: ${choice2}${moneyAr}`,
+    `🏁 <b>Duelo ${modeEs} finalizado</b>${timeoutLine}\n${resultLine}\n🎮 <b>Elecciones:</b> ${p1}: ${choice1} · ${p2}: ${choice2}${moneyEs}`,
   );
   if (result.gameMessageId) {
     await bot.api
@@ -1362,8 +1438,13 @@ export async function processGroupMatchTimeout(
     );
     const rewardText = tr(
       lang,
-      `🎉 <b>بابت برگزاری دوئل در گروهتان پاداش دریافت کردید</b>\n\n📍 <b>گروه:</b> ${esc(groupTitle)}\n⚔️ <b>رویداد:</b> یک دوئل ${mode} در این گروه به پایان رسید.\n💰 <b>مبلغ هر بازیکن:</b> ${fmt(Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🏦 <b>مجموع مبلغ دوئل:</b> ${fmt(2 * Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🧾 <b>کارمزد محاسبه‌شده:</b> ${fmt(Number(result.fee), String(result.currency))} ${label(String(result.currency), lang)}\n📊 <b>درصد پاداش فعال‌کننده:</b> ${Number(result.rewardPercent)}%\n🎁 <b>واریزی به کیف پولت:</b> +${fmt(Number(result.reward), String(result.currency))} ${label(String(result.currency), lang)}\n\nاین مبلغ به موجودی قابل‌استفادهٔ کیف پولت اضافه شد.`,
-      `🎉 <b>You received a reward for hosting a duel in your group</b>\n\n📍 <b>Group:</b> ${esc(groupTitle)}\n⚔️ <b>Event:</b> A ${mode} duel finished in this group.\n💰 <b>Stake per player:</b> ${fmt(Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🏦 <b>Total duel stake:</b> ${fmt(2 * Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🧾 <b>Calculated fee:</b> ${fmt(Number(result.fee), String(result.currency))} ${label(String(result.currency), lang)}\n📊 <b>Activator reward rate:</b> ${Number(result.rewardPercent)}%\n🎁 <b>Credited to your wallet:</b> +${fmt(Number(result.reward), String(result.currency))} ${label(String(result.currency), lang)}\n\nThis amount was added to your available wallet balance.`,
+      `🎉 <b>بابت برگزاری دوئل در گروهتان پاداش دریافت کردید</b>\n\n📍 <b>گروه:</b> ${esc(groupTitle)}\n⚔️ <b>رویداد:</b> یک دوئل ${modeFa} در این گروه به پایان رسید.\n💰 <b>مبلغ هر بازیکن:</b> ${fmt(Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🏦 <b>مجموع مبلغ دوئل:</b> ${fmt(2 * Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🧾 <b>کارمزد محاسبه‌شده:</b> ${fmt(Number(result.fee), String(result.currency))} ${label(String(result.currency), lang)}\n📊 <b>درصد پاداش فعال‌کننده:</b> ${Number(result.rewardPercent)}%\n🎁 <b>واریزی به کیف پولت:</b> +${fmt(Number(result.reward), String(result.currency))} ${label(String(result.currency), lang)}\n\nاین مبلغ به موجودی قابل‌استفادهٔ کیف پولت اضافه شد.`,
+
+      `🎉 <b>You received a reward for hosting a duel in your group</b>\n\n📍 <b>Group:</b> ${esc(groupTitle)}\n⚔️ <b>Event:</b> A ${modeEn} duel finished in this group.\n💰 <b>Stake per player:</b> ${fmt(Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🏦 <b>Total duel stake:</b> ${fmt(2 * Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🧾 <b>Calculated fee:</b> ${fmt(Number(result.fee), String(result.currency))} ${label(String(result.currency), lang)}\n📊 <b>Activator reward rate:</b> ${Number(result.rewardPercent)}%\n🎁 <b>Credited to your wallet:</b> +${fmt(Number(result.reward), String(result.currency))} ${label(String(result.currency), lang)}\n\nThis amount was added to your available wallet balance.`,
+
+      `🎉 <b>لقد حصلت على مكافأة مقابل تنظيم تحدٍ في مجموعتك</b>\n\n📍 <b>المجموعة:</b> ${esc(groupTitle)}\n⚔️ <b>الحدث:</b> اكتمل التحدي ${modeAr} في هذه المجموعة.\n💰 <b>الرهان لكل لاعب:</b> ${fmt(Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🏦 <b>إجمالي الرهان:</b> ${fmt(2 * Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🧾 <b>الرسوم المحسوبة:</b> ${fmt(Number(result.fee), String(result.currency))} ${label(String(result.currency), lang)}\n📊 <b>نسبة مكافأة المنشّط:</b> ${Number(result.rewardPercent)}%\n🎁 <b>المبلغ المضاف إلى محفظتك:</b> +${fmt(Number(result.reward), String(result.currency))} ${label(String(result.currency), lang)}\n\nتمت إضافة المبلغ إلى رصيدك المتاح.`,
+
+      `🎉 <b>Has recibido una recompensa por organizar un duelo en tu grupo</b>\n\n📍 <b>Grupo:</b> ${esc(groupTitle)}\n⚔️ <b>Evento:</b> Terminó un duelo ${modeEs} en este grupo.\n💰 <b>Apuesta por jugador:</b> ${fmt(Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🏦 <b>Apuesta total:</b> ${fmt(2 * Number(result.amount), String(result.currency))} ${label(String(result.currency), lang)}\n🧾 <b>Comisión calculada:</b> ${fmt(Number(result.fee), String(result.currency))} ${label(String(result.currency), lang)}\n📊 <b>Porcentaje de recompensa del activador:</b> ${Number(result.rewardPercent)}%\n🎁 <b>Ingresado en tu cartera:</b> +${fmt(Number(result.reward), String(result.currency))} ${label(String(result.currency), lang)}\n\nEste importe se añadió a tu saldo disponible.`,
     );
     await bot.api
       .sendMessage(Number(result.activatorId), rewardText, {

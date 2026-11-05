@@ -36,7 +36,8 @@ const GROUP_WORDS = new Set([
   "challenge",
   "/challenge",
   "چالنج",
-  "/چالنج",
+  "چالش",
+  "چلنج",
 ]);
 
 /** Only exact whole-message keywords enter the group stream; ordinary group chat is dropped. */

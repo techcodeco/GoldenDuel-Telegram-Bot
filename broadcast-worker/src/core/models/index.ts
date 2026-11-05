@@ -15,7 +15,7 @@ export interface IUser {
   refCode?: string
   firstName?: string
   username?: string
-  lang: 'fa' | 'en' | null
+  lang: 'fa' | 'en' | 'ar' | 'es' | null
   role: 'user' | 'admin' | 'owner'
   referrerId: number | null
   referralPaid: boolean
@@ -33,7 +33,7 @@ const userSchema = new Schema<IUser>(
     refCode: { type: String, unique: true, sparse: true },
     firstName: String,
     username: String,
-    lang: { type: String, default: null },
+    lang: { type: String, enum: ['fa', 'en', 'ar', 'es', null], default: null },
     role: { type: String, default: 'user' },
     referrerId: { type: Number, default: null, index: true },
     referralPaid: { type: Boolean, default: false },
@@ -362,8 +362,10 @@ export interface IBroadcastCampaign {
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
   sentUsers: number
   failedUsers: number
+  unknownUsers: number
   sentGroups: number
   failedGroups: number
+  unknownGroups: number
   processedUsers: number
   processedGroups: number
   lastUserObjectId?: string
@@ -390,8 +392,10 @@ const broadcastCampaignSchema = new Schema<IBroadcastCampaign>(
     status: { type: String, enum: ['queued', 'running', 'completed', 'failed', 'cancelled'], default: 'queued', index: true },
     sentUsers: { type: Number, default: 0 },
     failedUsers: { type: Number, default: 0 },
+    unknownUsers: { type: Number, default: 0 },
     sentGroups: { type: Number, default: 0 },
     failedGroups: { type: Number, default: 0 },
+    unknownGroups: { type: Number, default: 0 },
     processedUsers: { type: Number, default: 0 },
     processedGroups: { type: Number, default: 0 },
     lastUserObjectId: String,
@@ -410,7 +414,7 @@ export interface IBroadcastDelivery {
   targetType: 'user' | 'group'
   targetId: string
   chatId: string
-  status: 'pending' | 'sending' | 'sent' | 'failed'
+  status: 'pending' | 'sending' | 'sent' | 'failed' | 'unknown'
   attempts: number
   error?: string
   updatedAt?: Date
@@ -421,7 +425,7 @@ const broadcastDeliverySchema = new Schema<IBroadcastDelivery>(
     targetType: { type: String, enum: ['user', 'group'], required: true },
     targetId: { type: String, required: true },
     chatId: { type: String, required: true },
-    status: { type: String, enum: ['pending', 'sending', 'sent', 'failed'], default: 'pending', index: true },
+    status: { type: String, enum: ['pending', 'sending', 'sent', 'failed', 'unknown'], default: 'pending', index: true },
     attempts: { type: Number, default: 0 },
     error: { type: String, default: '' },
   },

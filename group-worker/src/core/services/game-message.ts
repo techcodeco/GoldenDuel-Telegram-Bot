@@ -7,22 +7,22 @@ import {
   sendEphemeralMessage,
 } from "../bot/ephemeral";
 
-function formatDuration(seconds: number, lang: "fa" | "en"): string {
+function formatDuration(seconds: number, lang: "fa" | "en" | "ar" | "es"): string {
   const total = Math.max(1, Math.floor(seconds));
   const minutes = Math.floor(total / 60);
   const remainingSeconds = total % 60;
-  if (lang === "fa") {
-    if (minutes === 0) return `${total} ثانیه`;
-    if (remainingSeconds === 0) return `${minutes} دقیقه`;
-    return `${minutes} دقیقه و ${remainingSeconds} ثانیه`;
+  if (lang === "fa" || lang === "ar") {
+    if (minutes === 0) return lang === "ar" ? `${total} ثانية` : `${total} ثانیه`;
+    if (remainingSeconds === 0) return lang === "ar" ? `${minutes} دقيقة` : `${minutes} دقیقه`;
+    return lang === "ar" ? `${minutes} دقيقة و ${remainingSeconds} ثانية` : `${minutes} دقیقه و ${remainingSeconds} ثانیه`;
   }
-  if (minutes === 0) return `${total} ${total === 1 ? "second" : "seconds"}`;
+  if (minutes === 0) return lang === "es" ? `${total} ${total === 1 ? "segundo" : "segundos"}` : `${total} ${total === 1 ? "second" : "seconds"}`;
   if (remainingSeconds === 0)
-    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
-  return `${minutes} ${minutes === 1 ? "minute" : "minutes"} and ${remainingSeconds} ${remainingSeconds === 1 ? "second" : "seconds"}`;
+    return lang === "es" ? `${minutes} ${minutes === 1 ? "minuto" : "minutos"}` : `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  return lang === "es" ? `${minutes} ${minutes === 1 ? "minuto" : "minutos"} y ${remainingSeconds} ${remainingSeconds === 1 ? "segundo" : "segundos"}` : `${minutes} ${minutes === 1 ? "minute" : "minutes"} and ${remainingSeconds} ${remainingSeconds === 1 ? "second" : "seconds"}`;
 }
 
-export function gameKeyboard(id: string, lang: "fa" | "en") {
+export function gameKeyboard(id: string, lang: "fa" | "en" | "ar" | "es") {
   const keyboard = new InlineKeyboard()
     .text(`🪨 ${tr(lang, "سنگ", "Rock")}`, `gw:move:${id}:r`)
     .text(`📄 ${tr(lang, "کاغذ", "Paper")}`, `gw:move:${id}:p`)
@@ -60,26 +60,30 @@ export async function gameProgressText(duel: any) {
     lang,
   );
   const isBet = duel.mode === "bet";
-  const mode = isBet
-    ? tr(lang, "شرطی", "bet")
-    : tr(lang, "دوستانه", "friendly");
+  const modeFa = isBet ? "شرطی" : "دوستانه";
+  const modeEn = isBet ? "bet" : "friendly";
+  const modeAr = isBet ? "برهان" : "ودي";
+  const modeEs = isBet ? "con apuesta" : "amistoso";
   const configuredTimeout = Number(
     isBet ? cfg?.betTimeoutSeconds : cfg?.friendlyTimeoutSeconds,
   );
   const durationSeconds = Math.max(30, Math.min(600, configuredTimeout || 180));
   const durationText = formatDuration(durationSeconds, lang);
-  const stakeFa = isBet
-    ? `\n💰 مبلغ هر بازیکن: <b>${fmt(Number(duel.amount), String(duel.currency))} ${curLabel(String(duel.currency), lang)}</b>`
-    : "\n🆓 بدون شرط مالی";
-  const stakeEn = isBet
-    ? `\n💰 Stake per player: <b>${fmt(Number(duel.amount), String(duel.currency))} ${curLabel(String(duel.currency), lang)}</b>`
-    : "\n🆓 No stake";
+  const money = `${fmt(Number(duel.amount), String(duel.currency))} ${curLabel(String(duel.currency), lang)}`;
+  const stakeFa = isBet ? `\n💰 مبلغ هر بازیکن: <b>${money}</b>` : "\n🆓 بدون شرط مالی";
+  const stakeEn = isBet ? `\n💰 Stake per player: <b>${money}</b>` : "\n🆓 No stake";
+  const stakeAr = isBet ? `\n💰 الرهان لكل لاعب: <b>${money}</b>` : "\n🆓 لا يوجد رهان";
+  const stakeEs = isBet ? `\n💰 Apuesta por jugador: <b>${money}</b>` : "\n🆓 Sin apuesta";
   const durationFa = `\n⏱️ مهلت انتخاب: <b>${durationText}</b>`;
   const durationEn = `\n⏱️ Choice time limit: <b>${durationText}</b>`;
+  const durationAr = `\n⏱️ مهلة الاختيار: <b>${durationText}</b>`;
+  const durationEs = `\n⏱️ Tiempo para elegir: <b>${durationText}</b>`;
   return tr(
     lang,
-    `⚔️ <b>رقابت ${mode}</b>\n👤 ${p1}\n👤 ${p2}${stakeFa}${durationFa}\n\nهر بازیکن فقط یک بار می‌تواند سنگ، کاغذ یا قیچی را انتخاب کند.`,
-    `⚔️ <b>${mode} duel</b>\n👤 ${p1}\n👤 ${p2}${stakeEn}${durationEn}\n\nEach player can choose rock, paper, or scissors exactly once.`,
+    `⚔️ <b>رقابت ${modeFa}</b>\n👤 ${p1}\n👤 ${p2}${stakeFa}${durationFa}\n\nهر بازیکن فقط یک بار می‌تواند سنگ، کاغذ یا قیچی را انتخاب کند.`,
+    `⚔️ <b>${modeEn} duel</b>\n👤 ${p1}\n👤 ${p2}${stakeEn}${durationEn}\n\nEach player can choose rock, paper, or scissors exactly once.`,
+    `⚔️ <b>تحدٍّ ${modeAr}</b>\n👤 ${p1}\n👤 ${p2}${stakeAr}${durationAr}\n\nيمكن لكل لاعب اختيار الحجر أو الورقة أو المقص مرة واحدة فقط.`,
+    `⚔️ <b>Duelo ${modeEs}</b>\n👤 ${p1}\n👤 ${p2}${stakeEs}${durationEs}\n\nCada jugador puede elegir piedra, papel o tijeras una sola vez.`,
   );
 }
 
@@ -319,7 +323,7 @@ export async function deleteDuelEphemeralCards(duel: any): Promise<void> {
 /** Legacy message cleanup, retained to handle duels created before the private-form rollout. */
 export async function disableGameMessage(
   duel: any,
-  _langOverride?: "fa" | "en",
+  _langOverride?: "fa" | "en" | "ar" | "es",
 ) {
   await deleteDuelEphemeralCards(duel);
   if (!duel?.gameMessageId) return;

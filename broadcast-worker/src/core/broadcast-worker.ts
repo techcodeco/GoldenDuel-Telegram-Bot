@@ -55,14 +55,15 @@ async function copyToTarget(sourceChatId: string, sourceMessageId: number, targe
   return { ok: false, error: 'retry_limit_exceeded' }
 }
 
-async function updateTargetCheckpoint(campaignId: string, type: 'user' | 'group', objectId: string, status: 'sent' | 'failed') {
+async function updateTargetCheckpoint(campaignId: string, type: 'user' | 'group', objectId: string, status: 'sent' | 'failed' | 'unknown') {
   const path = type === 'user' ? 'lastUserObjectId' : 'lastGroupObjectId'
   const processedPath = type === 'user' ? 'processedUsers' : 'processedGroups'
   const sentPath = type === 'user' ? 'sentUsers' : 'sentGroups'
   const failedPath = type === 'user' ? 'failedUsers' : 'failedGroups'
+  const unknownPath = type === 'user' ? 'unknownUsers' : 'unknownGroups'
   await BroadcastCampaign.updateOne(
     { _id: campaignId },
-    { $set: { [path]: objectId }, $inc: { [processedPath]: 1, [status === 'sent' ? sentPath : failedPath]: 1 } },
+    { $set: { [path]: objectId }, $inc: { [processedPath]: 1, [status === 'sent' ? sentPath : status === 'failed' ? failedPath : unknownPath]: 1 } },
   )
 }
 
@@ -75,7 +76,7 @@ async function processUserTargets(campaign: any): Promise<void> {
       const objectId = String(target._id)
       const targetId = String(target.tgId)
       const delivery = await ensureDelivery(campaign._id, 'user', targetId, targetId)
-      if (delivery?.status === 'sent' || delivery?.status === 'failed') {
+      if (delivery?.status === 'sent' || delivery?.status === 'failed' || delivery?.status === 'unknown') {
         // If a process died after writing the delivery result but before checkpointing, complete the checkpoint.
         await updateTargetCheckpoint(campaign._id, 'user', objectId, delivery.status)
         continue
@@ -104,7 +105,7 @@ async function processGroupTargets(campaign: any): Promise<void> {
       const objectId = String(target._id)
       const targetId = String(target.chatId)
       const delivery = await ensureDelivery(campaign._id, 'group', targetId, targetId)
-      if (delivery?.status === 'sent' || delivery?.status === 'failed') {
+      if (delivery?.status === 'sent' || delivery?.status === 'failed' || delivery?.status === 'unknown') {
         await updateTargetCheckpoint(campaign._id, 'group', objectId, delivery.status)
         continue
       }
@@ -124,16 +125,30 @@ async function processGroupTargets(campaign: any): Promise<void> {
   }
 }
 
-function reportText(campaign: any, summary: any, status: string): string {
-  const pendingUsers = Math.max(0, Number(campaign.estimatedUsers ?? 0) - summary.sentUsers - summary.failedUsers)
-  const pendingGroups = Math.max(0, Number(campaign.estimatedGroups ?? 0) - summary.sentGroups - summary.failedGroups)
-  return `📣 <b>گزارش نهایی پیام انبوه</b>\nشناسه کمپین: <code>${campaign._id}</code>\nوضعیت: <b>${status}</b>\n\n👤 کاربران هدف: ${campaign.estimatedUsers}\n✅ ارسال موفق به کاربران: ${summary.sentUsers}\n❌ ارسال ناموفق به کاربران: ${summary.failedUsers}\n⏳ ارسال‌نشده/پردازش‌نشده کاربران: ${pendingUsers}\n\n👥 گروه‌های هدف: ${campaign.estimatedGroups}\n✅ ارسال موفق به گروه‌ها: ${summary.sentGroups}\n❌ ارسال ناموفق به گروه‌ها: ${summary.failedGroups}\n⏳ ارسال‌نشده/پردازش‌نشده گروه‌ها: ${pendingGroups}\n\n📦 مجموع موفق: <b>${summary.sentUsers + summary.sentGroups}</b>\n⚠️ مجموع ناموفق: <b>${summary.failedUsers + summary.failedGroups}</b>\n⏳ مجموع ارسال‌نشده/پردازش‌نشده: <b>${pendingUsers + pendingGroups}</b>`
+function reportText(campaign: any, summary: any, status: string, lang: 'fa' | 'en' | 'ar' | 'es' = 'fa'): string {
+  const pendingUsers = Math.max(0, Number(campaign.estimatedUsers ?? 0) - summary.sentUsers - summary.failedUsers - Number(summary.unknownUsers ?? 0))
+  const pendingGroups = Math.max(0, Number(campaign.estimatedGroups ?? 0) - summary.sentGroups - summary.failedGroups - Number(summary.unknownGroups ?? 0))
+  const values = {
+    fa: `📣 <b>گزارش نهایی پیام انبوه</b>\nشناسه کمپین: <code>${campaign._id}</code>\nوضعیت: <b>${status}</b>\n\n👤 کاربران هدف: ${campaign.estimatedUsers}\n✅ ارسال موفق به کاربران: ${summary.sentUsers}\n❌ ارسال ناموفق به کاربران: ${summary.failedUsers}\n❔ وضعیت نامشخص کاربران: ${summary.unknownUsers ?? 0}\n⏳ پردازش‌نشده کاربران: ${pendingUsers}\n\n👥 گروه‌های هدف: ${campaign.estimatedGroups}\n✅ ارسال موفق به گروه‌ها: ${summary.sentGroups}\n❌ ارسال ناموفق به گروه‌ها: ${summary.failedGroups}\n❔ وضعیت نامشخص گروه‌ها: ${summary.unknownGroups ?? 0}\n⏳ پردازش‌نشده گروه‌ها: ${pendingGroups}\n\n📦 مجموع موفق: <b>${summary.sentUsers + summary.sentGroups}</b>\n⚠️ مجموع ناموفق: <b>${summary.failedUsers + summary.failedGroups}</b>\n❔ مجموع نامشخص: <b>${(summary.unknownUsers ?? 0) + (summary.unknownGroups ?? 0)}</b>`,
+    en: `📣 <b>Broadcast campaign report</b>\nCampaign: <code>${campaign._id}</code>\nStatus: <b>${status}</b>\n\n👤 Target users: ${campaign.estimatedUsers}\n✅ Sent to users: ${summary.sentUsers}\n❌ Failed for users: ${summary.failedUsers}\n❔ Unknown user deliveries: ${summary.unknownUsers ?? 0}\n⏳ Users not processed: ${pendingUsers}\n\n👥 Target groups: ${campaign.estimatedGroups}\n✅ Sent to groups: ${summary.sentGroups}\n❌ Failed for groups: ${summary.failedGroups}\n❔ Unknown group deliveries: ${summary.unknownGroups ?? 0}\n⏳ Groups not processed: ${pendingGroups}\n\n📦 Total sent: <b>${summary.sentUsers + summary.sentGroups}</b>\n⚠️ Total failed: <b>${summary.failedUsers + summary.failedGroups}</b>\n❔ Total unknown: <b>${(summary.unknownUsers ?? 0) + (summary.unknownGroups ?? 0)}</b>`,
+    ar: `📣 <b>تقرير حملة الإرسال</b>\nالحملة: <code>${campaign._id}</code>\nالحالة: <b>${status}</b>\n\n👤 المستخدمون المستهدفون: ${campaign.estimatedUsers}\n✅ تم الإرسال للمستخدمين: ${summary.sentUsers}\n❌ فشل الإرسال للمستخدمين: ${summary.failedUsers}\n❔ عمليات إرسال غير مؤكدة للمستخدمين: ${summary.unknownUsers ?? 0}\n⏳ مستخدمون لم تتم معالجتهم: ${pendingUsers}\n\n👥 المجموعات المستهدفة: ${campaign.estimatedGroups}\n✅ تم الإرسال للمجموعات: ${summary.sentGroups}\n❌ فشل الإرسال للمجموعات: ${summary.failedGroups}\n❔ عمليات إرسال غير مؤكدة للمجموعات: ${summary.unknownGroups ?? 0}\n⏳ مجموعات لم تتم معالجتها: ${pendingGroups}\n\n📦 إجمالي الإرسال الناجح: <b>${summary.sentUsers + summary.sentGroups}</b>\n⚠️ إجمالي الإرسال الفاشل: <b>${summary.failedUsers + summary.failedGroups}</b>\n❔ إجمالي الإرسال غير المؤكد: <b>${(summary.unknownUsers ?? 0) + (summary.unknownGroups ?? 0)}</b>`,
+    es: `📣 <b>Informe de la campaña de difusión</b>\nCampaña: <code>${campaign._id}</code>\nEstado: <b>${status}</b>\n\n👤 Usuarios objetivo: ${campaign.estimatedUsers}\n✅ Enviado a usuarios: ${summary.sentUsers}\n❌ Envíos fallidos a usuarios: ${summary.failedUsers}\n❔ Envíos de usuarios sin confirmar: ${summary.unknownUsers ?? 0}\n⏳ Usuarios sin procesar: ${pendingUsers}\n\n👥 Grupos objetivo: ${campaign.estimatedGroups}\n✅ Enviado a grupos: ${summary.sentGroups}\n❌ Envíos fallidos a grupos: ${summary.failedGroups}\n❔ Envíos de grupos sin confirmar: ${summary.unknownGroups ?? 0}\n⏳ Grupos sin procesar: ${pendingGroups}\n\n📦 Total enviados: <b>${summary.sentUsers + summary.sentGroups}</b>\n⚠️ Total fallidos: <b>${summary.failedUsers + summary.failedGroups}</b>\n❔ Total sin confirmar: <b>${(summary.unknownUsers ?? 0) + (summary.unknownGroups ?? 0)}</b>`,
+  }
+  return values[lang]
 }
 
 async function processCampaign(job: Job<{ campaignId: string }>): Promise<void> {
   const campaign = await BroadcastCampaign.findOne({ _id: job.data.campaignId, status: { $in: ['queued', 'running'] } }).lean()
   if (!campaign) return
   await BroadcastCampaign.updateOne({ _id: campaign._id }, { $set: { status: 'running', startedAt: campaign.startedAt ?? new Date(), lastError: '' } })
+  // Telegram copyMessage has no idempotency key. If a worker crashed while a
+  // delivery was marked `sending`, the remote side may already have accepted
+  // it. Mark it unknown rather than blindly retrying and potentially sending
+  // duplicates. The cursor will encounter each row and checkpoint it below.
+  await BroadcastDelivery.updateMany(
+    { campaignId: campaign._id, status: 'sending' },
+    { $set: { status: 'unknown', error: 'Worker stopped during delivery; Telegram acceptance cannot be verified safely.' } },
+  )
   try {
     await processUserTargets(campaign)
     // Refresh the persisted cursors before advancing to groups. A restart resumes where the campaign stopped.
@@ -145,7 +160,10 @@ async function processCampaign(job: Job<{ campaignId: string }>): Promise<void> 
       { _id: campaign._id },
       { $set: { ...summary, status: 'completed', finishedAt: new Date(), lastError: '' } },
     )
-    await bot.api.sendMessage(campaign.ownerId, reportText(campaign, summary, '✅ تکمیل شد'), { parse_mode: 'HTML' }).catch((e) => {
+    const owner = await User.findOne({ tgId: campaign.ownerId }).select('lang').lean() as any
+    const ownerLang = (['fa', 'en', 'ar', 'es'].includes(owner?.lang) ? owner.lang : 'fa') as 'fa' | 'en' | 'ar' | 'es'
+    const doneStatus = ({ fa: '✅ تکمیل شد', en: '✅ Completed', ar: '✅ اكتملت', es: '✅ Completada' } as const)[ownerLang]
+    await bot.api.sendMessage(campaign.ownerId, reportText(campaign, summary, doneStatus, ownerLang), { parse_mode: 'HTML' }).catch((e) => {
       logError('broadcast_final_report_failed', e, { campaignId: campaign._id, ownerId: campaign.ownerId })
     })
   } catch (error: any) {
@@ -156,8 +174,11 @@ async function processCampaign(job: Job<{ campaignId: string }>): Promise<void> 
       { $set: { status: exhausted ? 'failed' : 'queued', lastError: String(error?.message ?? error).slice(0, 1000), ...(exhausted ? { finishedAt: new Date() } : {}) } },
     )
     if (exhausted) {
-      const summary = await summarizeCampaignDeliveries(campaign._id).catch(() => ({ sentUsers: 0, failedUsers: 0, sentGroups: 0, failedGroups: 0 }))
-      await bot.api.sendMessage(campaign.ownerId, reportText(campaign, summary, '❌ خطا خورد؛ کمپین ناقص ماند'), { parse_mode: 'HTML' }).catch(() => undefined)
+      const summary = await summarizeCampaignDeliveries(campaign._id).catch(() => ({ sentUsers: 0, failedUsers: 0, unknownUsers: 0, sentGroups: 0, failedGroups: 0, unknownGroups: 0 }))
+      const owner = await User.findOne({ tgId: campaign.ownerId }).select('lang').lean() as any
+      const ownerLang = (['fa', 'en', 'ar', 'es'].includes(owner?.lang) ? owner.lang : 'fa') as 'fa' | 'en' | 'ar' | 'es'
+      const failedStatus = ({ fa: '❌ خطا خورد؛ کمپین ناقص ماند', en: '❌ Failed; campaign incomplete', ar: '❌ فشلت الحملة ولم تكتمل', es: '❌ Falló; campaña incompleta' } as const)[ownerLang]
+      await bot.api.sendMessage(campaign.ownerId, reportText(campaign, summary, failedStatus, ownerLang), { parse_mode: 'HTML' }).catch(() => undefined)
     }
     throw error
   }

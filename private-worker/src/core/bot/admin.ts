@@ -18,7 +18,7 @@ import { resolveManualDepositInvoice } from '../services/manualDeposits'
 import { adminChannelsKeyboard, adminMenuKeyboard, adminSettingsKeyboard, mainKeyboard, curName, broadcastAudienceKeyboard, broadcastUserFilterKeyboard, broadcastConfirmKeyboard } from './keyboards'
 import { notify } from './notify'
 import { bot, type BotContext } from './instance'
-import { t } from '../i18n'
+import { t, text4 } from '../i18n'
 
 const isAdmin = (ctx: BotContext) => ctx.u?.role === 'admin' || ctx.u?.role === 'owner'
 const isOwner = (ctx: BotContext) => ctx.u?.role === 'owner' || OWNER_IDS.has(ctx.from?.id ?? 0)
@@ -108,19 +108,29 @@ async function getPersistedBackupStatus(): Promise<ServerTelemetry | null> {
   }
 }
 
-function persistedBackupText(status: ServerTelemetry, online: boolean): string {
-  const labels: Record<string, string> = {
-    starting: 'در حال راه‌اندازی', running: 'در حال تهیه بکاپ', success: 'موفق', error: 'خطا', skipped: 'به‌دلیل قفل اجرا نشد',
+function persistedBackupText(status: ServerTelemetry, online: boolean, lang: BotContext['lang']): string {
+  const labels: Record<BotContext['lang'], Record<string, string>> = {
+    fa: { starting: 'در حال راه‌اندازی', running: 'در حال تهیه بکاپ', success: 'موفق', error: 'خطا', skipped: 'به‌دلیل قفل اجرا نشد', unknown: 'نامشخص' },
+    en: { starting: 'Starting', running: 'Running backup', success: 'Success', error: 'Error', skipped: 'Skipped due to lock', unknown: 'Unknown' },
+    ar: { starting: 'قيد التشغيل', running: 'جارٍ إنشاء النسخة الاحتياطية', success: 'ناجح', error: 'خطأ', skipped: 'تم التخطي بسبب القفل', unknown: 'غير معروف' },
+    es: { starting: 'Iniciando', running: 'Creando copia de seguridad', success: 'Correcto', error: 'Error', skipped: 'Omitido por bloqueo', unknown: 'Desconocido' },
   }
-  const label = labels[String(status.backupStatus ?? 'unknown')] ?? 'نامشخص'
-  return `🗄 <b>آخرین وضعیت بکاپ MongoDB</b>\n` +
-    `   📡 وضعیت worker: <b>${online ? 'آنلاین' : 'آفلاین / گزارشی دریافت نمی‌شود'}</b>\n` +
-    `   ✅ آخرین بکاپ موفق: <code>${status.lastBackupAt ? htmlEscape(new Date(status.lastBackupAt).toLocaleString('fa-IR', { hour12: false })) : 'ثبت نشده'}</code>\n` +
-    `   📊 نتیجهٔ آخرین اجرا: <b>${label}</b>\n` +
-    `   ⏱ فاصلهٔ تنظیم‌شده: <b>${Number(status.backupIntervalMinutes) || '—'} دقیقه</b>\n` +
-    `   📦 اندازه: <b>${status.lastBackupBytes ? formatBytes(status.lastBackupBytes) : '—'}</b>\n` +
-    `   📄 نام فایل تلگرام: <code>${htmlEscape(status.lastBackupFileName || '—')}</code>` +
-    (status.lastBackupError ? `\n   ⚠️ آخرین خطا: ${htmlEscape(status.lastBackupError.slice(0, 180))}` : '')
+  const label = labels[lang][String(status.backupStatus ?? 'unknown')] ?? labels[lang].unknown
+  const onlineLabel = lang === 'fa' ? (online ? 'آنلاین' : 'آفلاین / گزارشی دریافت نمی‌شود')
+    : lang === 'ar' ? (online ? 'متصل' : 'غير متصل / لا توجد تقارير')
+    : lang === 'es' ? (online ? 'En línea' : 'Desconectado / sin informes')
+    : (online ? 'Online' : 'Offline / no reports received')
+  const lastBackup = status.lastBackupAt ? htmlEscape(new Date(status.lastBackupAt).toLocaleString(text4(lang, 'fa-IR', 'en-GB'), { hour12: false })) : text4(lang, 'ثبت نشده', 'Not recorded')
+  const minutesLabel = lang === 'fa' ? 'دقیقه' : lang === 'ar' ? 'دقيقة' : lang === 'es' ? 'minutos' : 'minutes'
+  const title = lang === 'fa' ? 'آخرین وضعیت بکاپ MongoDB' : lang === 'ar' ? 'أحدث حالة للنسخ الاحتياطي لـ MongoDB' : lang === 'es' ? 'Último estado de la copia de MongoDB' : 'Latest MongoDB backup status'
+  return `🗄 <b>${title}</b>\n` +
+    `   📡 ${text4(lang, 'وضعیت worker', 'Worker status')}: <b>${onlineLabel}</b>\n` +
+    `   ✅ ${text4(lang, 'آخرین بکاپ موفق', 'Last successful backup')}: <code>${lastBackup}</code>\n` +
+    `   📊 ${text4(lang, 'نتیجهٔ آخرین اجرا', 'Last run result')}: <b>${label}</b>\n` +
+    `   ⏱ ${text4(lang, 'فاصلهٔ تنظیم‌شده', 'Configured interval')}: <b>${Number(status.backupIntervalMinutes) || '—'} ${minutesLabel}</b>\n` +
+    `   📦 ${text4(lang, 'اندازه', 'Size')}: <b>${status.lastBackupBytes ? formatBytes(status.lastBackupBytes) : '—'}</b>\n` +
+    `   📄 ${text4(lang, 'نام فایل تلگرام', 'Telegram file name')}: <code>${htmlEscape(status.lastBackupFileName || '—')}</code>` +
+    (status.lastBackupError ? `\n   ⚠️ ${text4(lang, 'آخرین خطا', 'Last error')}: ${htmlEscape(status.lastBackupError.slice(0, 180))}` : '')
 }
 
 function formatBytes(bytes: number): string {
@@ -137,18 +147,29 @@ function usageBar(percent: number): string {
   return `${'▰'.repeat(filled)}${'▱'.repeat(10 - filled)} ${safe.toFixed(1)}%`
 }
 
-async function serverStatusText(requestedPage = 0): Promise<{ text: string; page: number; totalPages: number }> {
+async function serverStatusText(lang: BotContext['lang'], requestedPage = 0): Promise<{ text: string; page: number; totalPages: number }> {
   const servers = await getServerTelemetry()
   const persistedBackup = await getPersistedBackupStatus()
   const backupWorkerOnline = servers.some((server) => server.instances.some((instance) => instance.service === 'backup-worker'))
-  const backupFallback = persistedBackup && !backupWorkerOnline ? `\n\n━━━━━━━━━━━━━━━━━━\n\n${persistedBackupText(persistedBackup, false)}` : ''
+  const backupFallback = persistedBackup && !backupWorkerOnline ? `\n\n━━━━━━━━━━━━━━━━━━\n\n${persistedBackupText(persistedBackup, false, lang)}` : ''
   if (!servers.length) {
-    return { text: '🛰 <b>وضعیت سرورها</b>\n\n⚠️ هنوز هیچ سرویس فعالی اطلاعات مانیتورینگ ارسال نکرده است.\n\nبررسی کن سرویس‌ها به Redis مشترک وصل باشند و در فایل <code>.env</code> مقدار <code>SERVER_NAME</code> تنظیم شده باشد.' + backupFallback, page: 0, totalPages: 1 }
+    const noData = lang === 'fa' ? '⚠️ هنوز هیچ سرویس فعالی اطلاعات مانیتورینگ ارسال نکرده است.\n\nبررسی کن سرویس‌ها به Redis مشترک وصل باشند و در فایل <code>.env</code> مقدار <code>SERVER_NAME</code> تنظیم شده باشد.'
+      : lang === 'ar' ? '⚠️ لم ترسل أي خدمة نشطة بيانات المراقبة بعد.\n\nتحقق من اتصال الخدمات بـ Redis المشترك ومن ضبط <code>SERVER_NAME</code> في ملف <code>.env</code>.'
+      : lang === 'es' ? '⚠️ Ningún servicio activo ha enviado datos de monitorización todavía.\n\nComprueba que los servicios usan Redis compartido y que <code>SERVER_NAME</code> está configurado en el archivo <code>.env</code>.'
+      : '⚠️ No active service has sent monitoring data yet.\n\nCheck that services use the shared Redis connection and that <code>SERVER_NAME</code> is set in each <code>.env</code> file.'
+    return { text: `🛰 <b>${text4(lang, 'وضعیت سرورها', 'Server status')}</b>\n\n${noData}${backupFallback}`, page: 0, totalPages: 1 }
   }
   const servicesCount = servers.reduce((sum, server) => sum + server.instances.length, 0)
   const totalPages = Math.max(1, Math.ceil(servers.length / 4))
   const page = Math.max(0, Math.min(totalPages - 1, Math.floor(requestedPage) || 0))
   const visibleServers = servers.slice(page * 4, page * 4 + 4)
+  const backupStatuses: Record<BotContext['lang'], Record<string, string>> = {
+    fa: { starting: 'در حال راه‌اندازی', running: 'در حال تهیه بکاپ', success: 'موفق', error: 'خطا', skipped: 'به‌دلیل قفل اجرا نشد', unknown: 'نامشخص' },
+    en: { starting: 'Starting', running: 'Running backup', success: 'Success', error: 'Error', skipped: 'Skipped due to lock', unknown: 'Unknown' },
+    ar: { starting: 'قيد التشغيل', running: 'جارٍ إنشاء النسخة الاحتياطية', success: 'ناجح', error: 'خطأ', skipped: 'تم التخطي بسبب القفل', unknown: 'غير معروف' },
+    es: { starting: 'Iniciando', running: 'Creando copia de seguridad', success: 'Correcto', error: 'Error', skipped: 'Omitido por bloqueo', unknown: 'Desconocido' },
+  }
+  const minuteLabel = lang === 'fa' ? 'دقیقه' : lang === 'ar' ? 'دقيقة' : lang === 'es' ? 'minutos' : 'minutes'
   const lines = visibleServers.map(({ name, metrics, instances }) => {
     const ram = metrics.totalMemoryBytes > 0 ? metrics.usedMemoryBytes / metrics.totalMemoryBytes * 100 : 0
     const disk = metrics.diskTotalBytes > 0 ? metrics.diskUsedBytes / metrics.diskTotalBytes * 100 : 0
@@ -156,39 +177,46 @@ async function serverStatusText(requestedPage = 0): Promise<{ text: string; page
     const serviceLines = services.map((service) => {
       const serviceInstances = instances.filter((x) => x.service === service)
       const instanceNames = serviceInstances.map((x) => `${htmlEscape(x.instanceName)} <code>#${Number(x.pid) || '?'}</code>`).slice(0, 8)
-      const remaining = serviceInstances.length > 8 ? ` و ${serviceInstances.length - 8} نمونهٔ دیگر` : ''
+      const remaining = serviceInstances.length > 8 ? ` + ${serviceInstances.length - 8} ${text4(lang, 'نمونهٔ دیگر', 'more instances')}` : ''
       return `   • <b>${htmlEscape(service)}</b>: ${instanceNames.join('، ')}${remaining}`
     }).join('\n')
     const backup = instances.filter((x) => x.service === 'backup-worker').sort((a, b) => Date.parse(b.sampledAt) - Date.parse(a.sampledAt))[0]
-    const backupStatus = backup ? ({
-      starting: 'در حال راه‌اندازی', running: 'در حال تهیه بکاپ', success: 'موفق', error: 'خطا', skipped: 'به‌دلیل قفل اجرا نشد',
-    } as Record<string, string>)[String(backup.backupStatus ?? 'unknown')] ?? 'نامشخص' : ''
-    const backupLines = backup ? `\n   🗄 <b>وضعیت بکاپ MongoDB:</b> ${backupStatus}` +
-      `\n   ⏱ <b>فاصلهٔ بکاپ:</b> ${Number(backup.backupIntervalMinutes) || '—'} دقیقه` +
-      `\n   🕒 <b>آخرین بکاپ موفق:</b> <code>${backup.lastBackupAt ? htmlEscape(new Date(backup.lastBackupAt).toLocaleString('fa-IR', { hour12: false })) : 'هنوز ثبت نشده'}</code>` +
-      `\n   📦 <b>حجم آخرین بکاپ:</b> ${backup.lastBackupBytes ? formatBytes(backup.lastBackupBytes) : '—'}` +
-      `\n   📄 <b>نام فایل تلگرام:</b> <code>${htmlEscape(backup.lastBackupFileName || '—')}</code>` +
-      (backup.lastBackupError ? `\n   ⚠️ <b>آخرین خطای بکاپ:</b> ${htmlEscape(backup.lastBackupError.slice(0, 180))}` : '') : ''
+    const backupStatus = backup ? backupStatuses[lang][String(backup.backupStatus ?? 'unknown')] ?? backupStatuses[lang].unknown : ''
+    const backupLines = backup ? `\n   🗄 <b>${text4(lang, 'وضعیت بکاپ MongoDB', 'MongoDB backup status')}:</b> ${backupStatus}` +
+      `\n   ⏱ <b>${text4(lang, 'فاصلهٔ بکاپ', 'Backup interval')}:</b> ${Number(backup.backupIntervalMinutes) || '—'} ${minuteLabel}` +
+      `\n   🕒 <b>${text4(lang, 'آخرین بکاپ موفق', 'Last successful backup')}:</b> <code>${backup.lastBackupAt ? htmlEscape(new Date(backup.lastBackupAt).toLocaleString(text4(lang, 'fa-IR', 'en-GB'), { hour12: false })) : text4(lang, 'هنوز ثبت نشده', 'Not yet recorded')}</code>` +
+      `\n   📦 <b>${text4(lang, 'حجم آخرین بکاپ', 'Last backup size')}:</b> ${backup.lastBackupBytes ? formatBytes(backup.lastBackupBytes) : '—'}` +
+      `\n   📄 <b>${text4(lang, 'نام فایل تلگرام', 'Telegram file name')}:</b> <code>${htmlEscape(backup.lastBackupFileName || '—')}</code>` +
+      (backup.lastBackupError ? `\n   ⚠️ <b>${text4(lang, 'آخرین خطای بکاپ', 'Last backup error')}:</b> ${htmlEscape(backup.lastBackupError.slice(0, 180))}` : '') : ''
     const namespace = instances.find((x) => x.monitoringNamespace)?.monitoringNamespace
     const hosts = [...new Set(instances.map((x) => x.hostname).filter(Boolean))].map(htmlEscape).join(', ')
-    return `🖥 <b>${htmlEscape(name)}</b>  ·  ${instances.length} نمونه سرویس\n` +
+    const countLabel = lang === 'fa' ? 'نمونه سرویس' : lang === 'ar' ? 'نسخة خدمة' : lang === 'es' ? 'instancias de servicio' : 'service instances'
+    const time = new Date(metrics.sampledAt).toLocaleTimeString(text4(lang, 'fa-IR', 'en-GB'), { hour12: false })
+    return `🖥 <b>${htmlEscape(name)}</b>  ·  ${instances.length} ${countLabel}\n` +
       `   🧩 <b>Namespace:</b> <code>${htmlEscape(namespace ?? '—')}</code>\n` +
       `   🖧 <b>Host:</b> <code>${hosts || '—'}</code>\n` +
-      `   ⚙️ CPU   <code>${usageBar(metrics.cpuPercent)}</code>\n` +
-      `   🧠 RAM   <code>${usageBar(ram)}</code>  (${formatBytes(metrics.usedMemoryBytes)} / ${formatBytes(metrics.totalMemoryBytes)})\n` +
-      `   💽 Disk  <code>${usageBar(disk)}</code>  (${formatBytes(metrics.diskUsedBytes)} / ${formatBytes(metrics.diskTotalBytes)})\n` +
-      `   📦 سرویس‌ها و instanceها:\n${serviceLines}${backupLines}\n` +
-      `   🕒 آخرین نمونه: <code>${new Date(metrics.sampledAt).toLocaleTimeString('fa-IR', { hour12: false })}</code>`
+      `   ⚙️ ${text4(lang, 'پردازنده', 'CPU')}   <code>${usageBar(metrics.cpuPercent)}</code>\n` +
+      `   🧠 ${text4(lang, 'حافظه RAM', 'RAM')}   <code>${usageBar(ram)}</code>  (${formatBytes(metrics.usedMemoryBytes)} / ${formatBytes(metrics.totalMemoryBytes)})\n` +
+      `   💽 ${text4(lang, 'فضای دیسک', 'Disk')}  <code>${usageBar(disk)}</code>  (${formatBytes(metrics.diskUsedBytes)} / ${formatBytes(metrics.diskTotalBytes)})\n` +
+      `   📦 ${text4(lang, 'سرویس‌ها و instanceها', 'Services and instances')}:\n${serviceLines}${backupLines}\n` +
+      `   🕒 ${text4(lang, 'آخرین نمونه', 'Last sample')}: <code>${time}</code>`
   })
-  const text = `🛰 <b>داشبورد وضعیت سرورها</b>\n` +
-    `━━━━━━━━━━━━━━━━━━\n` +
-    `🟢 سرورهای آنلاین: <b>${servers.length}</b>\n` +
-    `⚙️ نمونه‌سرویس‌های آنلاین: <b>${servicesCount}</b>\n` +
-    `🔄 به‌روزرسانی خودکار داده‌ها: هر ۵ ثانیه\n` +
-    `📄 صفحه <b>${page + 1}/${totalPages}</b>\n\n` +
-    lines.join('\n\n━━━━━━━━━━━━━━━━━━\n\n') +
-    backupFallback +
-    `\n\n<i>هر سرور بر اساس SERVER_NAME گروه‌بندی شده است؛ بنابراین چند Worker روی یک سرور فقط یک سرور محسوب می‌شوند.</i>`
+  const title = text4(lang, 'داشبورد وضعیت سرورها', 'Server status dashboard')
+  const onlineServers = text4(lang, 'سرورهای آنلاین', 'Online servers')
+  const onlineInstances = text4(lang, 'نمونه‌سرویس‌های آنلاین', 'Online service instances')
+  const refresh = lang === 'fa' ? 'هر ۵ ثانیه' : lang === 'ar' ? 'كل 5 ثوانٍ' : lang === 'es' ? 'cada 5 segundos' : 'every 5 seconds'
+  const pageLabel = lang === 'fa' ? `صفحه ${page + 1}/${totalPages}` : lang === 'ar' ? `الصفحة ${page + 1}/${totalPages}` : lang === 'es' ? `Página ${page + 1}/${totalPages}` : `Page ${page + 1}/${totalPages}`
+  const footer = lang === 'fa' ? 'هر سرور بر اساس SERVER_NAME گروه‌بندی شده است؛ بنابراین چند Worker روی یک سرور فقط یک سرور محسوب می‌شوند.'
+    : lang === 'ar' ? 'يتم تجميع كل خادم حسب SERVER_NAME، لذلك تُحسب عدة Workers على الجهاز نفسه كخادم واحد.'
+    : lang === 'es' ? 'Cada servidor se agrupa por SERVER_NAME, por lo que varios workers en una máquina cuentan como un solo servidor.'
+    : 'Each server is grouped by SERVER_NAME, so multiple workers on one machine count as a single server.'
+  const text = `🛰 <b>${title}</b>\n━━━━━━━━━━━━━━━━━━\n` +
+    `🟢 ${onlineServers}: <b>${servers.length}</b>\n` +
+    `⚙️ ${onlineInstances}: <b>${servicesCount}</b>\n` +
+    `🔄 ${text4(lang, 'به‌روزرسانی خودکار داده‌ها', 'Automatic data refresh')}: ${refresh}\n` +
+    `📄 ${pageLabel}\n\n` +
+    lines.join('\n\n━━━━━━━━━━━━━━━━━━\n\n') + backupFallback +
+    `\n\n<i>${footer}</i>`
   return { text, page, totalPages }
 }
 
@@ -211,21 +239,21 @@ async function notifyOwnerDepositDecision(p: {
   const id = await ownerId()
   if (!id) return
   const owner = await User.findOne({ tgId: id }).select('lang').lean()
-  const lang: BotContext['lang'] = owner?.lang === 'en' ? 'en' : 'fa'
-  const approvedText = lang === 'fa' ? '✅ تأیید شد' : '✅ Approved'
-  const rejectedText = lang === 'fa' ? '❌ رد شد' : '❌ Rejected'
-  const text = `${lang === 'fa' ? '📣 <b>گزارش بررسی فاکتور واریز</b>' : '📣 <b>Deposit invoice review report</b>'}
+  const lang: BotContext['lang'] = owner?.lang === 'fa' || owner?.lang === 'en' || owner?.lang === 'ar' || owner?.lang === 'es' ? owner.lang : 'fa'
+  const approvedText = text4(lang, '✅ تأیید شد', '✅ Approved')
+  const rejectedText = text4(lang, '❌ رد شد', '❌ Rejected')
+  const text = `${text4(lang, '📣 <b>گزارش بررسی فاکتور واریز</b>', '📣 <b>Deposit invoice review report</b>')}
 `+
-    `${lang === 'fa' ? 'کد فاکتور' : 'Invoice'}: <code>${p.invoiceNumber}</code>
+    `${text4(lang, 'کد فاکتور', 'Invoice')}: <code>${p.invoiceNumber}</code>
 `+
-    `${lang === 'fa' ? 'شناسه کاربر' : 'User ID'}: <code>${p.userId}</code>
+    `${text4(lang, 'شناسه کاربر', 'User ID')}: <code>${p.userId}</code>
 `+
-    `${lang === 'fa' ? 'مبلغ' : 'Amount'}: <b>${formatAmount(p.amount, p.currency)} ${curName(lang, p.currency)}</b>
+    `${text4(lang, 'مبلغ', 'Amount')}: <b>${formatAmount(p.amount, p.currency)} ${curName(lang, p.currency)}</b>
 `+
-    `${lang === 'fa' ? 'وضعیت نهایی' : 'Final status'}: <b>${p.approved ? approvedText : rejectedText}</b>
+    `${text4(lang, 'وضعیت نهایی', 'Final status')}: <b>${p.approved ? approvedText : rejectedText}</b>
 `+
-    `${!p.approved && p.rejectionReason ? `${lang === 'fa' ? 'دلیل رد' : 'Rejection reason'}: ${htmlEscape(p.rejectionReason)}\n` : ''}`+
-    `${lang === 'fa' ? 'بررسی‌کننده' : 'Reviewed by'}: <code>${p.reviewedBy}</code>`
+    `${!p.approved && p.rejectionReason ? `${text4(lang, 'دلیل رد', 'Rejection reason')}: ${htmlEscape(p.rejectionReason)}\n` : ''}`+
+    `${text4(lang, 'بررسی‌کننده', 'Reviewed by')}: <code>${p.reviewedBy}</code>`
   await notify(id, text)
 }
 
@@ -526,39 +554,38 @@ const htmlEscape = (value: unknown): string => String(value ?? '')
   .replace(/"/g, '&quot;')
 
 function manualInvoiceText(invoice: IManualDepositInvoice, lang: BotContext['lang']): string {
-  const isFa = lang === 'fa'
   const createdAt = invoice.createdAt
-    ? new Date(invoice.createdAt).toLocaleString(isFa ? 'fa-IR' : 'en-GB')
+    ? new Date(invoice.createdAt).toLocaleString(text4(lang, 'fa-IR', 'en-GB'))
     : '—'
   const status = invoice.status === 'pending'
-    ? (isFa ? '⏳ در انتظار بررسی' : '⏳ Pending review')
+    ? (text4(lang, '⏳ در انتظار بررسی', '⏳ Pending review'))
     : invoice.status === 'approved'
-      ? (isFa ? '✅ تأیید شده' : '✅ Approved')
-      : (isFa ? '❌ رد شده' : '❌ Rejected')
-  const username = invoice.userUsername ? `@${htmlEscape(invoice.userUsername)}` : (isFa ? 'ثبت نشده' : 'not set')
+      ? (text4(lang, '✅ تأیید شده', '✅ Approved'))
+      : (text4(lang, '❌ رد شده', '❌ Rejected'))
+  const username = invoice.userUsername ? `@${htmlEscape(invoice.userUsername)}` : (text4(lang, 'ثبت نشده', 'not set'))
   const destination = invoice.currency === 'IRT'
-    ? `${isFa ? 'شماره کارت ذخیره‌شده' : 'Snapshotted card number'}: <code>${htmlEscape(invoice.cardNumber)}</code>\n${isFa ? 'صاحب کارت' : 'Card holder'}: <b>${htmlEscape(invoice.cardHolder)}</b>`
-    : (isFa ? 'پرداخت TON از طریق فاکتور شبکه TON انجام می‌شود.' : 'TON payments use native TON invoices.')
-  return `${isFa ? '🧾 <b>جزئیات فاکتور واریز دستی</b>' : '🧾 <b>Manual deposit invoice details</b>'}
+    ? `${text4(lang, 'شماره کارت ذخیره‌شده', 'Snapshotted card number')}: <code>${htmlEscape(invoice.cardNumber)}</code>\n${text4(lang, 'صاحب کارت', 'Card holder')}: <b>${htmlEscape(invoice.cardHolder)}</b>`
+    : (text4(lang, 'پرداخت TON از طریق فاکتور شبکه TON انجام می‌شود.', 'TON payments use native TON invoices.'))
+  return `${text4(lang, '🧾 <b>جزئیات فاکتور واریز دستی</b>', '🧾 <b>Manual deposit invoice details</b>')}
 ━━━━━━━━━━━━━━━━━━
-${isFa ? 'کد فاکتور' : 'Invoice code'}: <code>${invoice.invoiceNumber}</code>
-${isFa ? 'وضعیت' : 'Status'}: <b>${status}</b>
-${isFa ? 'نام ثبت‌شده' : 'Registered name'}: <b>${htmlEscape(invoice.userFirstName || (isFa ? 'ثبت نشده' : 'not set'))}</b>
-${isFa ? 'نام کاربری' : 'Username'}: ${username}
-${isFa ? 'آیدی عددی تلگرام' : 'Telegram numeric ID'}: <code>${invoice.userId}</code>
-${isFa ? 'مبلغ فاکتور' : 'Invoice amount'}: <b>${formatAmount(invoice.amount, invoice.currency)} ${invoice.currency}</b>
-${isFa ? 'زمان ساخت فاکتور' : 'Created at'}: <b>${htmlEscape(createdAt)}</b>
+${text4(lang, 'کد فاکتور', 'Invoice code')}: <code>${invoice.invoiceNumber}</code>
+${text4(lang, 'وضعیت', 'Status')}: <b>${status}</b>
+${text4(lang, 'نام ثبت‌شده', 'Registered name')}: <b>${htmlEscape(invoice.userFirstName || (text4(lang, 'ثبت نشده', 'not set')))}</b>
+${text4(lang, 'نام کاربری', 'Username')}: ${username}
+${text4(lang, 'آیدی عددی تلگرام', 'Telegram numeric ID')}: <code>${invoice.userId}</code>
+${text4(lang, 'مبلغ فاکتور', 'Invoice amount')}: <b>${formatAmount(invoice.amount, invoice.currency)} ${invoice.currency}</b>
+${text4(lang, 'زمان ساخت فاکتور', 'Created at')}: <b>${htmlEscape(createdAt)}</b>
 ${destination}
-${isFa ? 'پشتیبانی ثبت‌شده در زمان صدور' : 'Support username at creation'}: @${htmlEscape(invoice.supportUsername || '')}
-${invoice.reviewedBy ? `${isFa ? 'بررسی‌کننده' : 'Reviewed by'}: <code>${invoice.reviewedBy}</code>` : ''}\n${invoice.reviewReason ? `${isFa ? 'دلیل رد' : 'Rejection reason'}: <b>${htmlEscape(invoice.reviewReason)}</b>` : ''}`
+${text4(lang, 'پشتیبانی ثبت‌شده در زمان صدور', 'Support username at creation')}: @${htmlEscape(invoice.supportUsername || '')}
+${invoice.reviewedBy ? `${text4(lang, 'بررسی‌کننده', 'Reviewed by')}: <code>${invoice.reviewedBy}</code>` : ''}\n${invoice.reviewReason ? `${text4(lang, 'دلیل رد', 'Rejection reason')}: <b>${htmlEscape(invoice.reviewReason)}</b>` : ''}`
 }
 
 const manualInvoiceKeyboard = (invoice: IManualDepositInvoice, lang: BotContext['lang']) => invoice.status !== 'pending'
   ? { inline_keyboard: [] as Array<Array<{ text: string; callback_data: string }>> }
   : {
       inline_keyboard: [[
-        { text: lang === 'fa' ? '✅ تأیید و شارژ حساب' : '✅ Approve and credit', callback_data: `inv:approve:${invoice.invoiceNumber}` },
-        { text: lang === 'fa' ? '❌ رد فاکتور' : '❌ Reject invoice', callback_data: `inv:reject:${invoice.invoiceNumber}` },
+        { text: text4(lang, '✅ تأیید و شارژ حساب', '✅ Approve and credit'), callback_data: `inv:approve:${invoice.invoiceNumber}` },
+        { text: text4(lang, '❌ رد فاکتور', '❌ Reject invoice'), callback_data: `inv:reject:${invoice.invoiceNumber}` },
       ]],
     }
 
@@ -604,7 +631,7 @@ export async function processManualDepositDecision(
 
   const amount = formatAmount(resolved.amount, resolved.currency)
   const invoiceUser = await User.findOne({ tgId: resolved.userId }).select('balances lang').lean()
-  const userLang: BotContext['lang'] = invoiceUser?.lang === 'fa' ? 'fa' : 'en'
+  const userLang: BotContext['lang'] = invoiceUser?.lang === 'fa' || invoiceUser?.lang === 'en' || invoiceUser?.lang === 'ar' || invoiceUser?.lang === 'es' ? invoiceUser.lang : 'en'
   const currencyName = resolved.currency === 'IRT' ? (userLang === 'fa' ? 'تومان' : 'Toman') : (userLang === 'fa' ? 'تون (گرام)' : 'TON (Gram)')
   if (approve) {
     const balance = Number(invoiceUser?.balances?.[resolved.currency]?.available ?? 0)
@@ -655,42 +682,42 @@ export async function handleManualInvoiceSearch(ctx: BotContext, input: string):
   if (withdrawal) {
     const user = await User.findOne({ tgId: withdrawal.userId }).select('firstName username').lean()
     const status = withdrawal.status === 'pending'
-      ? (ctx.lang === 'fa' ? '⏳ در انتظار بررسی مالک' : '⏳ Pending owner review')
+      ? (text4(ctx.lang, '⏳ در انتظار بررسی مالک', '⏳ Pending owner review'))
       : withdrawal.status === 'paid'
-        ? (ctx.lang === 'fa' ? '✅ پرداخت‌شده' : '✅ Paid')
-        : (ctx.lang === 'fa' ? '❌ ردشده و مبلغ برگشته' : '❌ Rejected and refunded')
+        ? (text4(ctx.lang, '✅ پرداخت‌شده', '✅ Paid'))
+        : (text4(ctx.lang, '❌ ردشده و مبلغ برگشته', '❌ Rejected and refunded'))
     const isToman = withdrawal.currency === 'IRT'
     const destinationLabel = isToman
-      ? (ctx.lang === 'fa' ? 'شماره شبای مقصد' : 'Destination IBAN')
-      : (ctx.lang === 'fa' ? 'آدرس کیف پول مقصد' : 'Destination wallet')
+      ? (text4(ctx.lang, 'شماره شبای مقصد', 'Destination IBAN'))
+      : (text4(ctx.lang, 'آدرس کیف پول مقصد', 'Destination wallet'))
     const feeLabel = isToman
-      ? (ctx.lang === 'fa' ? 'کارمزد ثابت بین‌بانکی' : 'Fixed interbank fee')
-      : (ctx.lang === 'fa' ? 'کارمزد ثابت شبکه TON' : 'Fixed TON network fee')
+      ? (text4(ctx.lang, 'کارمزد ثابت بین‌بانکی', 'Fixed interbank fee'))
+      : (text4(ctx.lang, 'کارمزد ثابت شبکه TON', 'Fixed TON network fee'))
     const amount = formatAmount(withdrawal.amount, withdrawal.currency)
     const fee = formatAmount(withdrawal.fee ?? 0, withdrawal.currency)
     const payout = formatAmount(withdrawal.payoutAmount ?? (withdrawal.amount - (withdrawal.fee ?? 0)), withdrawal.currency)
     const currencyName = curName(ctx.lang, withdrawal.currency)
     const name = htmlEscape(user?.firstName ?? '—')
     const username = user?.username ? '@' + htmlEscape(user.username) : '—'
-    const text = `${ctx.lang === 'fa' ? '📤 <b>فاکتور برداشت</b>' : '📤 <b>Withdrawal invoice</b>'}\n` +
+    const text = `${text4(ctx.lang, '📤 <b>فاکتور برداشت</b>', '📤 <b>Withdrawal invoice</b>')}\n` +
       `کد پیگیری: <code>${htmlEscape(withdrawal._id)}</code>\n` +
-      `${ctx.lang === 'fa' ? 'وضعیت' : 'Status'}: <b>${status}</b>\n` +
-      `${ctx.lang === 'fa' ? 'کاربر' : 'User'}: <b>${name}</b> (${username}) · <code>${withdrawal.userId}</code>\n` +
-      `${ctx.lang === 'fa' ? 'مبلغ رزروشده/کسرشده از موجودی' : 'Gross amount reserved'}: <b>${amount} ${currencyName}</b>\n` +
+      `${text4(ctx.lang, 'وضعیت', 'Status')}: <b>${status}</b>\n` +
+      `${text4(ctx.lang, 'کاربر', 'User')}: <b>${name}</b> (${username}) · <code>${withdrawal.userId}</code>\n` +
+      `${text4(ctx.lang, 'مبلغ رزروشده/کسرشده از موجودی', 'Gross amount reserved')}: <b>${amount} ${currencyName}</b>\n` +
       `${feeLabel}: <b>${fee} ${currencyName}</b>\n` +
-      `${ctx.lang === 'fa' ? 'مبلغ خالص قابل پرداخت به کاربر' : 'Net amount to pay'}: <b>${payout} ${currencyName}</b>\n` +
+      `${text4(ctx.lang, 'مبلغ خالص قابل پرداخت به کاربر', 'Net amount to pay')}: <b>${payout} ${currencyName}</b>\n` +
       `${destinationLabel}: <code>${htmlEscape(withdrawal.dest)}</code>\n` +
-      `${withdrawal.bankName ? `${ctx.lang === 'fa' ? 'بانک' : 'Bank'}: <b>${htmlEscape(withdrawal.bankName)}</b>\n` : ''}` +
-      `${withdrawal.fullName ? `${ctx.lang === 'fa' ? 'نام صاحب حساب' : 'Account holder'}: <b>${htmlEscape(withdrawal.fullName)}</b>\n` : ''}` +
-      `${ctx.lang === 'fa' ? 'زمان ثبت' : 'Created'}: ${withdrawal.createdAt ? new Date(withdrawal.createdAt).toLocaleString(ctx.lang === 'fa' ? 'fa-IR' : 'en-GB') : '—'}\n` +
-      `${ctx.lang === 'fa' ? 'یادآوری' : 'Reminder'}: ${isToman
-        ? (ctx.lang === 'fa' ? 'برای پرداخت، مالک باید از همراه‌بانک مبلغ خالص را به شبای مقصد واریز کند.' : 'The owner should transfer the net amount to the IBAN using mobile banking.')
-        : (ctx.lang === 'fa' ? 'برای پرداخت، مالک باید از Tonkeeper مبلغ خالص را به آدرس مقصد ارسال کند.' : 'The owner should send the net amount to the destination using Tonkeeper.')}` +
-      `${withdrawal.reviewReason ? `\n${ctx.lang === 'fa' ? 'دلیل رد' : 'Rejection reason'}: <b>${htmlEscape(withdrawal.reviewReason)}</b>` : ''}`
+      `${withdrawal.bankName ? `${text4(ctx.lang, 'بانک', 'Bank')}: <b>${htmlEscape(withdrawal.bankName)}</b>\n` : ''}` +
+      `${withdrawal.fullName ? `${text4(ctx.lang, 'نام صاحب حساب', 'Account holder')}: <b>${htmlEscape(withdrawal.fullName)}</b>\n` : ''}` +
+      `${text4(ctx.lang, 'زمان ثبت', 'Created')}: ${withdrawal.createdAt ? new Date(withdrawal.createdAt).toLocaleString(text4(ctx.lang, 'fa-IR', 'en-GB')) : '—'}\n` +
+      `${text4(ctx.lang, 'یادآوری', 'Reminder')}: ${isToman
+        ? (text4(ctx.lang, 'برای پرداخت، مالک باید از همراه‌بانک مبلغ خالص را به شبای مقصد واریز کند.', 'The owner should transfer the net amount to the IBAN using mobile banking.'))
+        : (text4(ctx.lang, 'برای پرداخت، مالک باید از Tonkeeper مبلغ خالص را به آدرس مقصد ارسال کند.', 'The owner should send the net amount to the destination using Tonkeeper.'))}` +
+      `${withdrawal.reviewReason ? `\n${text4(ctx.lang, 'دلیل رد', 'Rejection reason')}: <b>${htmlEscape(withdrawal.reviewReason)}</b>` : ''}`
     const markup = isOwner(ctx) && withdrawal.status === 'pending'
       ? { inline_keyboard: [[
-          { text: ctx.lang === 'fa' ? '✅ پرداخت شد' : '✅ Mark paid', callback_data: `wda:ok:${withdrawal._id}` },
-          { text: ctx.lang === 'fa' ? '❌ رد و بازگشت مبلغ' : '❌ Reject/refund', callback_data: `wda:no:${withdrawal._id}` },
+          { text: text4(ctx.lang, '✅ پرداخت شد', '✅ Mark paid'), callback_data: `wda:ok:${withdrawal._id}` },
+          { text: text4(ctx.lang, '❌ رد و بازگشت مبلغ', '❌ Reject/refund'), callback_data: `wda:no:${withdrawal._id}` },
         ]] }
       : undefined
     await ctx.reply(text, { parse_mode: 'HTML', ...(markup ? { reply_markup: markup } : {}) })
@@ -705,19 +732,19 @@ export async function handleManualInvoiceSearch(ctx: BotContext, input: string):
 
   if (tonDepositInvoice) {
     const status = tonDepositInvoice.status === 'paid'
-      ? (ctx.lang === 'fa' ? '✅ پرداخت‌شده' : '✅ Paid')
-      : (ctx.lang === 'fa' ? '⏳ منتظر تراکنش بلاک‌چینی' : '⏳ Awaiting blockchain transaction')
-    const text = `${ctx.lang === 'fa' ? '💎 <b>فاکتور واریز TON</b>' : '💎 <b>TON deposit invoice</b>'}\n` +
-      `${ctx.lang === 'fa' ? 'کد پیگیری' : 'Tracking number'}: <code>${tonDepositInvoice.invoiceNumber}</code>\n` +
-      `${ctx.lang === 'fa' ? 'وضعیت' : 'Status'}: <b>${status}</b>\n` +
-      `${ctx.lang === 'fa' ? 'شناسه کاربر' : 'User ID'}: <code>${tonDepositInvoice.userId}</code>\n` +
-      `${ctx.lang === 'fa' ? 'مبلغ دقیق' : 'Exact amount'}: <b>${formatAmount(tonDepositInvoice.amount, 'TON')} ${curName(ctx.lang, 'TON')}</b>\n` +
-      `${ctx.lang === 'fa' ? 'شبکه' : 'Network'}: <b>${htmlEscape(tonDepositInvoice.network ?? 'mainnet')}</b>\n` +
-      `${ctx.lang === 'fa' ? 'آدرس دریافت' : 'Recipient address'}: <code>${htmlEscape(tonDepositInvoice.recipientAddress)}</code>\n` +
-      `${ctx.lang === 'fa' ? 'کامنت/شناسه مرجع' : 'Reference comment'}: <code>${htmlEscape(tonDepositInvoice.comment)}</code>\n` +
-      `${tonDepositInvoice.txHash ? `${ctx.lang === 'fa' ? 'هش تراکنش' : 'Transaction hash'}: <code>${htmlEscape(tonDepositInvoice.txHash)}</code>\n` : ''}` +
-      `${tonDepositInvoice.sourceAddress ? `${ctx.lang === 'fa' ? 'آدرس فرستنده' : 'Source address'}: <code>${htmlEscape(tonDepositInvoice.sourceAddress)}</code>\n` : ''}` +
-      `${ctx.lang === 'fa' ? 'ایجاد شده' : 'Created'}: ${tonDepositInvoice.createdAt ? new Date(tonDepositInvoice.createdAt).toLocaleString(ctx.lang === 'fa' ? 'fa-IR' : 'en-GB') : '—'}`
+      ? (text4(ctx.lang, '✅ پرداخت‌شده', '✅ Paid'))
+      : (text4(ctx.lang, '⏳ منتظر تراکنش بلاک‌چینی', '⏳ Awaiting blockchain transaction'))
+    const text = `${text4(ctx.lang, '💎 <b>فاکتور واریز TON</b>', '💎 <b>TON deposit invoice</b>')}\n` +
+      `${text4(ctx.lang, 'کد پیگیری', 'Tracking number')}: <code>${tonDepositInvoice.invoiceNumber}</code>\n` +
+      `${text4(ctx.lang, 'وضعیت', 'Status')}: <b>${status}</b>\n` +
+      `${text4(ctx.lang, 'شناسه کاربر', 'User ID')}: <code>${tonDepositInvoice.userId}</code>\n` +
+      `${text4(ctx.lang, 'مبلغ دقیق', 'Exact amount')}: <b>${formatAmount(tonDepositInvoice.amount, 'TON')} ${curName(ctx.lang, 'TON')}</b>\n` +
+      `${text4(ctx.lang, 'شبکه', 'Network')}: <b>${htmlEscape(tonDepositInvoice.network ?? 'mainnet')}</b>\n` +
+      `${text4(ctx.lang, 'آدرس دریافت', 'Recipient address')}: <code>${htmlEscape(tonDepositInvoice.recipientAddress)}</code>\n` +
+      `${text4(ctx.lang, 'کامنت/شناسه مرجع', 'Reference comment')}: <code>${htmlEscape(tonDepositInvoice.comment)}</code>\n` +
+      `${tonDepositInvoice.txHash ? `${text4(ctx.lang, 'هش تراکنش', 'Transaction hash')}: <code>${htmlEscape(tonDepositInvoice.txHash)}</code>\n` : ''}` +
+      `${tonDepositInvoice.sourceAddress ? `${text4(ctx.lang, 'آدرس فرستنده', 'Source address')}: <code>${htmlEscape(tonDepositInvoice.sourceAddress)}</code>\n` : ''}` +
+      `${text4(ctx.lang, 'ایجاد شده', 'Created')}: ${tonDepositInvoice.createdAt ? new Date(tonDepositInvoice.createdAt).toLocaleString(text4(ctx.lang, 'fa-IR', 'en-GB')) : '—'}`
     await ctx.reply(text, { parse_mode: 'HTML' })
   }
 }
@@ -838,25 +865,37 @@ async function backupManagementView(lang: BotContext['lang']): Promise<{ text: s
   } catch (error) { logError('backup_interval_dashboard_read_failed', error) }
   const status = await getPersistedBackupStatus()
   const history = await backupHistory()
-  const fa = lang === 'fa'
-  const stateLabel = online ? (fa ? '🟢 آنلاین' : '🟢 Online') : (fa ? '🔴 آفلاین' : '🔴 Offline')
-  const text = fa
-    ? `🗄 <b>مدیریت بکاپ MongoDB</b>\n━━━━━━━━━━━━━━━━━━\n\n🖥 وضعیت Worker: <b>${stateLabel}</b>\n⏱ فاصلهٔ بکاپ: <b>${interval} دقیقه</b>\n📦 تعداد بکاپ‌های ثبت‌شده: <b>${history.length}</b>\n🕒 آخرین بکاپ موفق: <code>${status?.lastBackupAt ? htmlEscape(new Date(status.lastBackupAt).toLocaleString('fa-IR', { hour12: false })) : 'هنوز ثبت نشده'}</code>\n📄 آخرین فایل: <code>${htmlEscape(status?.lastBackupFileName || history[0]?.fileName || '—')}</code>\n📏 حجم آخرین فایل: <b>${status?.lastBackupBytes ? formatBytes(status.lastBackupBytes) : history[0]?.bytes ? formatBytes(history[0].bytes) : '—'}</b>\n📌 وضعیت آخرین اجرا: <b>${htmlEscape(status?.backupStatus || 'نامشخص')}</b>${status?.lastBackupError ? `\n⚠️ آخرین خطا: ${htmlEscape(status.lastBackupError.slice(0, 250))}` : ''}\n\nفایل ZIP مستقیماً در همین چت تلگرام ارسال می‌شود و داخل آن پوشهٔ BSON قابل‌بازیابی با <code>mongorestore</code> قرار دارد.`
-    : `🗄 <b>MongoDB Backup Management</b>\n━━━━━━━━━━━━━━━━━━\n\n🖥 Worker status: <b>${stateLabel}</b>\n⏱ Backup interval: <b>${interval} minutes</b>\n📦 Saved backup count: <b>${history.length}</b>\n🕒 Last successful backup: <code>${status?.lastBackupAt ? htmlEscape(new Date(status.lastBackupAt).toLocaleString('en-GB')) : 'Not yet recorded'}</code>\n📄 Last file: <code>${htmlEscape(status?.lastBackupFileName || history[0]?.fileName || '—')}</code>\n📏 Last file size: <b>${status?.lastBackupBytes ? formatBytes(status.lastBackupBytes) : history[0]?.bytes ? formatBytes(history[0].bytes) : '—'}</b>\n📌 Last run: <b>${htmlEscape(status?.backupStatus || 'unknown')}</b>${status?.lastBackupError ? `\n⚠️ Last error: ${htmlEscape(status.lastBackupError.slice(0, 250))}` : ''}\n\nZIP files are sent directly to this Telegram chat and contain BSON dumps restorable with <code>mongorestore</code>.`
+  const onlineLabel = lang === 'fa' ? (online ? 'آنلاین' : 'آفلاین') : lang === 'ar' ? (online ? 'متصل' : 'غير متصل') : lang === 'es' ? (online ? 'En línea' : 'Desconectado') : (online ? 'Online' : 'Offline')
+  const statusLabels: Record<BotContext['lang'], Record<string, string>> = {
+    fa: { starting: 'در حال راه‌اندازی', running: 'در حال تهیه بکاپ', success: 'موفق', error: 'خطا', skipped: 'به‌دلیل قفل اجرا نشد', unknown: 'نامشخص' },
+    en: { starting: 'Starting', running: 'Running backup', success: 'Success', error: 'Error', skipped: 'Skipped due to lock', unknown: 'Unknown' },
+    ar: { starting: 'قيد التشغيل', running: 'جارٍ إنشاء النسخة الاحتياطية', success: 'ناجح', error: 'خطأ', skipped: 'تم التخطي بسبب القفل', unknown: 'غير معروف' },
+    es: { starting: 'Iniciando', running: 'Creando copia de seguridad', success: 'Correcto', error: 'Error', skipped: 'Omitido por bloqueo', unknown: 'Desconocido' },
+  }
+  const lastAt = status?.lastBackupAt ? htmlEscape(new Date(status.lastBackupAt).toLocaleString(text4(lang, 'fa-IR', 'en-GB'), { hour12: false })) : text4(lang, 'هنوز ثبت نشده', 'Not yet recorded')
+  const lastFile = htmlEscape(status?.lastBackupFileName || history[0]?.fileName || '—')
+  const size = status?.lastBackupBytes ? formatBytes(status.lastBackupBytes) : history[0]?.bytes ? formatBytes(history[0].bytes) : '—'
+  const state = statusLabels[lang][String(status?.backupStatus ?? 'unknown')] ?? statusLabels[lang].unknown
+  const detail = lang === 'fa'
+    ? `🗄 <b>مدیریت بکاپ MongoDB</b>\n━━━━━━━━━━━━━━━━━━\n\n🖥 وضعیت Worker: <b>${onlineLabel}</b>\n⏱ فاصلهٔ بکاپ: <b>${interval} دقیقه</b>\n📦 تعداد بکاپ‌های ثبت‌شده: <b>${history.length}</b>\n🕒 آخرین بکاپ موفق: <code>${lastAt}</code>\n📄 آخرین فایل: <code>${lastFile}</code>\n📏 حجم آخرین فایل: <b>${size}</b>\n📌 وضعیت آخرین اجرا: <b>${state}</b>${status?.lastBackupError ? `\n⚠️ آخرین خطا: ${htmlEscape(status.lastBackupError.slice(0, 250))}` : ''}\n\nفایل ZIP مستقیماً در همین چت تلگرام ارسال می‌شود و داخل آن پوشهٔ BSON قابل‌بازیابی با <code>mongorestore</code> قرار دارد.`
+    : lang === 'ar'
+      ? `🗄 <b>إدارة النسخ الاحتياطي لـ MongoDB</b>\n━━━━━━━━━━━━━━━━━━\n\n🖥 حالة العامل: <b>${onlineLabel}</b>\n⏱ الفترة: <b>${interval} دقيقة</b>\n📦 عدد النسخ المحفوظة: <b>${history.length}</b>\n🕒 آخر نسخة ناجحة: <code>${lastAt}</code>\n📄 آخر ملف: <code>${lastFile}</code>\n📏 حجم آخر ملف: <b>${size}</b>\n📌 نتيجة آخر تشغيل: <b>${state}</b>${status?.lastBackupError ? `\n⚠️ آخر خطأ: ${htmlEscape(status.lastBackupError.slice(0, 250))}` : ''}\n\nيُرسل ملف ZIP مباشرةً في هذه المحادثة ويحتوي على ملفات BSON قابلة للاستعادة باستخدام <code>mongorestore</code>.`
+      : lang === 'es'
+        ? `🗄 <b>Gestión de copias de seguridad de MongoDB</b>\n━━━━━━━━━━━━━━━━━━\n\n🖥 Estado del worker: <b>${onlineLabel}</b>\n⏱ Intervalo: <b>${interval} minutos</b>\n📦 Copias guardadas: <b>${history.length}</b>\n🕒 Última copia correcta: <code>${lastAt}</code>\n📄 Último archivo: <code>${lastFile}</code>\n📏 Tamaño del último archivo: <b>${size}</b>\n📌 Resultado de la última ejecución: <b>${state}</b>${status?.lastBackupError ? `\n⚠️ Último error: ${htmlEscape(status.lastBackupError.slice(0, 250))}` : ''}\n\nEl archivo ZIP se envía directamente a este chat de Telegram e incluye volcados BSON que pueden restaurarse con <code>mongorestore</code>.`
+        : `🗄 <b>MongoDB Backup Management</b>\n━━━━━━━━━━━━━━━━━━\n\n🖥 Worker status: <b>${onlineLabel}</b>\n⏱ Backup interval: <b>${interval} minutes</b>\n📦 Saved backup count: <b>${history.length}</b>\n🕒 Last successful backup: <code>${lastAt}</code>\n📄 Last file: <code>${lastFile}</code>\n📏 Last file size: <b>${size}</b>\n📌 Last run: <b>${state}</b>${status?.lastBackupError ? `\n⚠️ Last error: ${htmlEscape(status.lastBackupError.slice(0, 250))}` : ''}\n\nZIP files are sent directly to this Telegram chat and contain BSON dumps restorable with <code>mongorestore</code>.`
   const keyboard = {
     inline_keyboard: [
-      [{ text: fa ? '⏱ تنظیم فاصله بکاپ' : '⏱ Set backup interval', callback_data: 'backup:interval:set', style: 'primary' }],
-      [{ text: fa ? '📚 تاریخچه / دانلود بکاپ‌ها' : '📚 Backup history / download', callback_data: 'backup:history:0', style: 'primary' }],
-      [{ text: fa ? '⚡ بکاپ‌گیری همین الان' : '⚡ Run backup now', callback_data: 'backup:now', style: 'success' }],
-      [{ text: fa ? '🔄 تازه‌سازی وضعیت' : '🔄 Refresh status', callback_data: 'admin:backups', style: 'primary' }],
-      [{ text: fa ? '⬅️ بازگشت به مدیریت ربات' : '⬅️ Back to admin', callback_data: 'admin:home', style: 'primary' }],
+      [{ text: text4(lang, '⏱ تنظیم فاصله بکاپ', '⏱ Set backup interval'), callback_data: 'backup:interval:set', style: 'primary' }],
+      [{ text: text4(lang, '📚 تاریخچه / دانلود بکاپ‌ها', '📚 Backup history / download'), callback_data: 'backup:history:0', style: 'primary' }],
+      [{ text: text4(lang, '⚡ بکاپ‌گیری همین الان', '⚡ Run backup now'), callback_data: 'backup:now', style: 'success' }],
+      [{ text: text4(lang, '🔄 تازه‌سازی وضعیت', '🔄 Refresh status'), callback_data: 'admin:backups', style: 'primary' }],
+      [{ text: text4(lang, '⬅️ بازگشت به مدیریت ربات', '⬅️ Back to admin'), callback_data: 'admin:home', style: 'primary' }],
     ],
   }
-  return { text, keyboard }
+  return { text: detail, keyboard }
 }
 
 async function sendBackupHistoryPage(ctx: BotContext, requestedPage: number): Promise<void> {
-  const fa = ctx.lang === 'fa'
   const rows = await backupHistory()
   const pageSize = 5
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize))
@@ -864,26 +903,30 @@ async function sendBackupHistoryPage(ctx: BotContext, requestedPage: number): Pr
   const slice = rows.slice(page * pageSize, page * pageSize + pageSize)
   const lines = slice.map((entry, index) => {
     const position = page * pageSize + index + 1
-    const date = new Date(entry.createdAt).toLocaleString(fa ? 'fa-IR' : 'en-GB', { hour12: false })
-    return `${position}. <b>${htmlEscape(entry.fileName)}</b>\n   🕒 <code>${htmlEscape(date)}</code> · 📦 <b>${formatBytes(entry.bytes)}</b> · 🧩 ${entry.collectionFiles} ${fa ? 'فایل BSON' : 'BSON files'}${(entry.telegramParts?.length ?? 1) > 1 ? ` · ${entry.telegramParts!.length} ${fa ? 'بخش تلگرام' : 'Telegram parts'}` : ''}\n   🔐 <code>${htmlEscape(entry.sha256.slice(0, 16))}…</code>`
+    const date = new Date(entry.createdAt).toLocaleString(text4(ctx.lang, 'fa-IR', 'en-GB'), { hour12: false })
+    const bson = text4(ctx.lang, 'فایل BSON', 'BSON files')
+    const parts = text4(ctx.lang, 'بخش تلگرام', 'Telegram parts')
+    return `${position}. <b>${htmlEscape(entry.fileName)}</b>\n   🕒 <code>${htmlEscape(date)}</code> · 📦 <b>${formatBytes(entry.bytes)}</b> · 🧩 ${entry.collectionFiles} ${bson}${(entry.telegramParts?.length ?? 1) > 1 ? ` · ${entry.telegramParts!.length} ${parts}` : ''}\n   🔐 <code>${htmlEscape(entry.sha256.slice(0, 16))}…</code>`
   })
-  const text = fa
-    ? `📚 <b>تاریخچه بکاپ‌ها</b> · صفحه ${page + 1}/${totalPages}\n\n${lines.join('\n\n') || 'هنوز بکاپ موفقی ثبت نشده است.'}\n\nبرای دریافت دوبارهٔ هر فایل، دکمهٔ همان بکاپ را بزن.`
-    : `📚 <b>Backup history</b> · page ${page + 1}/${totalPages}\n\n${lines.join('\n\n') || 'No successful backups have been recorded yet.'}\n\nTap a backup button to download it again.`
+  const emptyText = ctx.lang === 'fa' ? 'هنوز بکاپ موفقی ثبت نشده است.' : ctx.lang === 'ar' ? 'لم يتم تسجيل نسخة احتياطية ناجحة بعد.' : ctx.lang === 'es' ? 'Todavía no se ha registrado ninguna copia correcta.' : 'No successful backups have been recorded yet.'
+  const instruction = ctx.lang === 'fa' ? 'برای دریافت دوبارهٔ هر فایل، دکمهٔ همان بکاپ را بزن.' : ctx.lang === 'ar' ? 'لإعادة تنزيل أي ملف، اضغط زر النسخة الاحتياطية المطلوبة.' : ctx.lang === 'es' ? 'Pulsa el botón de una copia para volver a descargarla.' : 'Tap a backup button to download it again.'
+  const pageText = ctx.lang === 'fa' ? `صفحه ${page + 1}/${totalPages}` : ctx.lang === 'ar' ? `الصفحة ${page + 1}/${totalPages}` : ctx.lang === 'es' ? `Página ${page + 1}/${totalPages}` : `Page ${page + 1}/${totalPages}`
+  const title = text4(ctx.lang, '📚 <b>تاریخچه بکاپ‌ها</b>', '📚 <b>Backup history</b>')
+  const text = `${title} · ${pageText}\n\n${lines.join('\n\n') || emptyText}\n\n${instruction}`
   const keyboard: any = { inline_keyboard: [] as any[][] }
   for (const entry of slice) keyboard.inline_keyboard.push([{ text: `📥 ${entry.fileName.slice(0, 35)}`, callback_data: `backup:dl:${entry.id}`, style: 'success' }])
   const nav: any[] = []
-  if (page > 0) nav.push({ text: fa ? '⬅️ قبلی' : '⬅️ Previous', callback_data: `backup:history:${page - 1}`, style: 'primary' })
-  if (page + 1 < totalPages) nav.push({ text: fa ? 'بعدی ➡️' : 'Next ➡️', callback_data: `backup:history:${page + 1}`, style: 'primary' })
+  if (page > 0) nav.push({ text: text4(ctx.lang, '⬅️ قبلی', '⬅️ Previous'), callback_data: `backup:history:${page - 1}`, style: 'primary' })
+  if (page + 1 < totalPages) nav.push({ text: text4(ctx.lang, 'بعدی ➡️', 'Next ➡️'), callback_data: `backup:history:${page + 1}`, style: 'primary' })
   if (nav.length) keyboard.inline_keyboard.push(nav)
-  keyboard.inline_keyboard.push([{ text: fa ? '⬅️ بازگشت به مدیریت بکاپ' : '⬅️ Backup management', callback_data: 'admin:backups', style: 'primary' }])
+  keyboard.inline_keyboard.push([{ text: text4(ctx.lang, '⬅️ بازگشت به مدیریت بکاپ', '⬅️ Backup management'), callback_data: 'admin:backups', style: 'primary' }])
   await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: keyboard }).catch(async () => { await ctx.reply(text, { parse_mode: 'HTML', reply_markup: keyboard }) })
 }
 
 export function registerAdmin(): void {
   bot.callbackQuery('admin:backups', async (ctx) => {
     await ctx.answerCallbackQuery().catch(() => {})
-    if (!isOwner(ctx)) return void (await ctx.reply(ctx.lang === 'fa' ? '⛔ مدیریت بکاپ فقط برای مالک ربات است.' : '⛔ Backup management is owner-only.'))
+    if (!isOwner(ctx)) return void (await ctx.reply(text4(ctx.lang, '⛔ مدیریت بکاپ فقط برای مالک ربات است.', '⛔ Backup management is owner-only.')))
     const view = await backupManagementView(ctx.lang)
     await ctx.editMessageText(view.text, { parse_mode: 'HTML', reply_markup: view.keyboard }).catch(async () => { await ctx.reply(view.text, { parse_mode: 'HTML', reply_markup: view.keyboard }) })
   })
@@ -892,9 +935,7 @@ export function registerAdmin(): void {
     await ctx.answerCallbackQuery().catch(() => {})
     if (!isOwner(ctx)) return void (await ctx.reply('⛔'))
     await setState(ctx.from.id, { s: 'admin_backup_interval' })
-    await ctx.reply(ctx.lang === 'fa'
-      ? '⏱ فاصلهٔ بکاپ را به دقیقه بفرست (عدد صحیح از ۱ تا ۱۴۴۰). نمونه: <code>15</code> یعنی هر ۱۵ دقیقه، <code>60</code> یعنی هر ساعت. برای لغو /cancel را بفرست.'
-      : '⏱ Send the backup interval in minutes (integer from 1 to 1440). Example: <code>15</code> means every 15 minutes; <code>60</code> means hourly. Send /cancel to abort.', { parse_mode: 'HTML' })
+    await ctx.reply(text4(ctx.lang, '⏱ فاصلهٔ بکاپ را به دقیقه بفرست (عدد صحیح از ۱ تا ۱۴۴۰). نمونه: <code>15</code> یعنی هر ۱۵ دقیقه، <code>60</code> یعنی هر ساعت. برای لغو /cancel را بفرست.', '⏱ Send the backup interval in minutes (integer from 1 to 1440). Example: <code>15</code> means every 15 minutes; <code>60</code> means hourly. Send /cancel to abort.'), { parse_mode: 'HTML' })
   })
 
   bot.callbackQuery(/^backup:history:(\d+)$/, async (ctx) => {
@@ -907,20 +948,20 @@ export function registerAdmin(): void {
     await ctx.answerCallbackQuery().catch(() => {})
     if (!isOwner(ctx)) return void (await ctx.reply('⛔'))
     const entry = (await backupHistory()).find((item) => item.id === ctx.match[1])
-    if (!entry) return void (await ctx.reply(ctx.lang === 'fa' ? '⚠️ این بکاپ در تاریخچه پیدا نشد.' : '⚠️ Backup not found in history.'))
+    if (!entry) return void (await ctx.reply(text4(ctx.lang, '⚠️ این بکاپ در تاریخچه پیدا نشد.', '⚠️ Backup not found in history.')))
     try {
       const parts = entry.telegramParts?.length ? entry.telegramParts : [{ fileId: entry.telegramFileId, messageId: entry.telegramMessageId, chatId: entry.telegramChatId, fileName: entry.fileName, bytes: entry.bytes }]
       for (let index = 0; index < parts.length; index++) {
         const part = parts[index]!
         const caption = parts.length === 1
-          ? `${entry.fileName}\n${ctx.lang === 'fa' ? 'زمان' : 'Created'}: ${entry.createdAt}\n${ctx.lang === 'fa' ? 'حجم' : 'Size'}: ${formatBytes(entry.bytes)}\nSHA-256: ${entry.sha256}`
-          : `${entry.fileName} · ${ctx.lang === 'fa' ? 'بخش' : 'part'} ${index + 1}/${parts.length}\n${ctx.lang === 'fa' ? 'بعد از دانلود همه بخش‌ها، آن‌ها را به ترتیب به هم متصل و ZIP حاصل را استخراج کن.' : 'Download every part, concatenate them in order, then extract the resulting ZIP.'}\nSHA-256: ${entry.sha256}`
+          ? `${entry.fileName}\n${text4(ctx.lang, 'زمان', 'Created')}: ${entry.createdAt}\n${text4(ctx.lang, 'حجم', 'Size')}: ${formatBytes(entry.bytes)}\nSHA-256: ${entry.sha256}`
+          : `${entry.fileName} · ${text4(ctx.lang, 'بخش', 'part')} ${index + 1}/${parts.length}\n${text4(ctx.lang, 'بعد از دانلود همه بخش‌ها، آن‌ها را به ترتیب به هم متصل و ZIP حاصل را استخراج کن.', 'Download every part, concatenate them in order, then extract the resulting ZIP.')}\nSHA-256: ${entry.sha256}`
         await ctx.api.sendDocument(ctx.from.id, part.fileId, { caption } as any)
         if (parts.length > 1 && index + 1 < parts.length) await new Promise((resolve) => setTimeout(resolve, 1100))
       }
     } catch (error) {
       logError('backup_history_download_failed', error, { backupId: entry.id, ownerId: ctx.from.id })
-      await ctx.reply(ctx.lang === 'fa' ? '❌ ارسال مجدد فایل با تلگرام ناموفق بود؛ ممکن است فایل حذف شده یا شناسهٔ آن نامعتبر باشد.' : '❌ Telegram could not resend this backup file; it may have been deleted or the file id is invalid.')
+      await ctx.reply(text4(ctx.lang, '❌ ارسال مجدد فایل با تلگرام ناموفق بود؛ ممکن است فایل حذف شده یا شناسهٔ آن نامعتبر باشد.', '❌ Telegram could not resend this backup file; it may have been deleted or the file id is invalid.'))
     }
   })
 
@@ -929,12 +970,10 @@ export function registerAdmin(): void {
     if (!isOwner(ctx)) return void (await ctx.reply('⛔'))
     const online = await backupWorkerIsOnline().catch(() => false)
     if (!online) {
-      return void (await ctx.reply(ctx.lang === 'fa'
-        ? '🚨 ورکر بکاپ آفلاین است؛ درخواست اجرا ارسال نشد. ابتدا سرویس backup-worker را روشن و اتصال Redis را بررسی کن.'
-        : '🚨 Backup worker is offline; no run request was sent. Start backup-worker and check its Redis connection first.'))
+      return void (await ctx.reply(text4(ctx.lang, '🚨 ورکر بکاپ آفلاین است؛ درخواست اجرا ارسال نشد. ابتدا سرویس backup-worker را روشن و اتصال Redis را بررسی کن.', '🚨 Backup worker is offline; no run request was sent. Start backup-worker and check its Redis connection first.')))
     }
     await redis.publish(BACKUP_COMMAND_CHANNEL, JSON.stringify({ action: 'run-now', requestedBy: ctx.from.id }))
-    await ctx.reply(ctx.lang === 'fa' ? '⏳ درخواست بکاپ دستی به ورکر ارسال شد. پس از اتمام، فایل ZIP در همین چت ارسال می‌شود.' : '⏳ Manual backup request sent to the worker. The ZIP will be sent here when complete.')
+    await ctx.reply(text4(ctx.lang, '⏳ درخواست بکاپ دستی به ورکر ارسال شد. پس از اتمام، فایل ZIP در همین چت ارسال می‌شود.', '⏳ Manual backup request sent to the worker. The ZIP will be sent here when complete.'))
   })
   const cmd = (name: string, ownerOnly: boolean, fn: (ctx: BotContext, args: string[]) => Promise<string | void>) =>
     bot.command(name, async (ctx) => {
@@ -1150,7 +1189,7 @@ export function registerAdmin(): void {
   bot.callbackQuery(/^admin:servers:p:(\d+)$/, async (ctx) => {
     await ctx.answerCallbackQuery().catch(() => {})
     if (!isOwner(ctx)) return void (await ctx.reply('⛔ داشبورد سرورها فقط برای مالک ربات قابل مشاهده است.'))
-    const result = await serverStatusText(Number(ctx.match[1]))
+    const result = await serverStatusText(ctx.lang, Number(ctx.match[1]))
     const keyboard = new InlineKeyboard()
     if (result.page > 0) keyboard.text('⬅️ قبلی', `admin:servers:p:${result.page - 1}`)
     keyboard.text('🔄 تازه‌سازی', `admin:servers:p:${result.page}`)
@@ -1175,10 +1214,10 @@ export function registerAdmin(): void {
         await new Promise((resolve) => setTimeout(resolve, 220))
         await ctx.api.editMessageText(ctx.chat!.id, loading.message_id, `🛰 <b>در حال بررسی سرورها...</b>\n\n${frame}`, { parse_mode: 'HTML' }).catch(() => undefined)
       }
-      const status = await serverStatusText(0)
-      const keyboard = new InlineKeyboard().text(ctx.lang === 'fa' ? '🔄 تازه‌سازی' : '🔄 Refresh', 'admin:servers')
-      if (status.totalPages > 1) keyboard.text(ctx.lang === 'fa' ? 'بعدی ➡️' : 'Next ➡️', 'admin:servers:p:1')
-      keyboard.row().text(ctx.lang === 'fa' ? '⬅️ بازگشت به مدیریت' : '⬅️ Back to admin', 'admin:home')
+      const status = await serverStatusText(ctx.lang, 0)
+      const keyboard = new InlineKeyboard().text(text4(ctx.lang, '🔄 تازه‌سازی', '🔄 Refresh'), 'admin:servers')
+      if (status.totalPages > 1) keyboard.text(text4(ctx.lang, 'بعدی ➡️', 'Next ➡️'), 'admin:servers:p:1')
+      keyboard.row().text(text4(ctx.lang, '⬅️ بازگشت به مدیریت', '⬅️ Back to admin'), 'admin:home')
       await ctx.api.editMessageText(ctx.chat!.id, loading.message_id, status.text, { parse_mode: 'HTML', reply_markup: keyboard }).catch(async () => { await ctx.reply(status.text, { parse_mode: 'HTML', reply_markup: keyboard }) })
       return
     }
@@ -1309,33 +1348,33 @@ export function registerAdmin(): void {
     await ctx.answerCallbackQuery().catch(() => {})
     if (!isOwner(ctx)) return void (await ctx.reply('⛔ فاکتورهای برداشت فقط برای مالک قابل مشاهده هستند.'))
     const w = await Withdrawal.findById(ctx.match[1]).lean()
-    if (!w) return void (await ctx.reply(ctx.lang === 'fa' ? '❌ فاکتور برداشت پیدا نشد.' : '❌ Withdrawal invoice not found.'))
+    if (!w) return void (await ctx.reply(text4(ctx.lang, '❌ فاکتور برداشت پیدا نشد.', '❌ Withdrawal invoice not found.')))
     const u = await User.findOne({ tgId: w.userId }).select('firstName username').lean()
-    const status = w.status === 'pending' ? (ctx.lang === 'fa' ? '⏳ در انتظار بررسی' : '⏳ Pending') : w.status === 'paid' ? (ctx.lang === 'fa' ? '✅ تأیید/پرداخت‌شده' : '✅ Approved/paid') : (ctx.lang === 'fa' ? '❌ لغوشده و مبلغ برگشته' : '❌ Cancelled/refunded')
+    const status = w.status === 'pending' ? (text4(ctx.lang, '⏳ در انتظار بررسی', '⏳ Pending')) : w.status === 'paid' ? (text4(ctx.lang, '✅ تأیید/پرداخت‌شده', '✅ Approved/paid')) : (text4(ctx.lang, '❌ لغوشده و مبلغ برگشته', '❌ Cancelled/refunded'))
     const name = htmlEscape(u?.firstName ?? '—')
     const username = u?.username ? '@' + htmlEscape(u.username) : '—'
-    const destinationLabel = w.currency === 'IRT' ? (ctx.lang === 'fa' ? 'شماره شبا' : 'IBAN') : (ctx.lang === 'fa' ? 'آدرس کیف پول' : 'Wallet address')
-    const text = `${ctx.lang === 'fa' ? '📤 <b>جزئیات فاکتور برداشت</b>' : '📤 <b>Withdrawal invoice details</b>'}\n`+
+    const destinationLabel = w.currency === 'IRT' ? (text4(ctx.lang, 'شماره شبا', 'IBAN')) : (text4(ctx.lang, 'آدرس کیف پول', 'Wallet address'))
+    const text = `${text4(ctx.lang, '📤 <b>جزئیات فاکتور برداشت</b>', '📤 <b>Withdrawal invoice details</b>')}\n`+
       `━━━━━━━━━━━━━━━━━━\n`+
-      `${ctx.lang === 'fa' ? 'کد فاکتور' : 'Invoice ID'}: <code>${htmlEscape(w._id)}</code>\n`+
-      `${ctx.lang === 'fa' ? 'وضعیت' : 'Status'}: <b>${status}</b>\n`+
-      `${ctx.lang === 'fa' ? 'نام کاربر' : 'User'}: <b>${name}</b> (${username})\n`+
-      `${ctx.lang === 'fa' ? 'شناسه تلگرام' : 'Telegram ID'}: <code>${w.userId}</code>\n`+
-      `${ctx.lang === 'fa' ? 'مبلغ کسرشده از موجودی' : 'Gross amount deducted'}: <b>${formatAmount(w.amount, w.currency)} ${curName(ctx.lang, w.currency)}</b>\n`+
-      `${ctx.lang === 'fa' ? (w.currency === 'IRT' ? 'کارمزد ثابت بین‌بانکی' : 'کارمزد ثابت شبکه TON') : (w.currency === 'IRT' ? 'Fixed interbank fee' : 'Fixed TON network fee')}: <b>${formatAmount(w.fee ?? 0, w.currency)} ${curName(ctx.lang, w.currency)}</b>\n`+
-      `${ctx.lang === 'fa' ? 'مبلغی که باید واریز شود' : 'Net amount to send'}: <b>${formatAmount(w.payoutAmount ?? (w.amount - (w.fee ?? 0)), w.currency)} ${curName(ctx.lang, w.currency)}</b>\n`+
-      `${w.fullName ? `${ctx.lang === 'fa' ? 'نام و نام خانوادگی صاحب شبا' : 'IBAN account holder'}: <b>${htmlEscape(w.fullName)}</b>\n` : ''}`+
-      `${w.bankName ? `${ctx.lang === 'fa' ? 'بانک تشخیص‌داده‌شده' : 'Detected bank'}: <b>${htmlEscape(w.bankName)}</b>\n` : ''}`+
+      `${text4(ctx.lang, 'کد فاکتور', 'Invoice ID')}: <code>${htmlEscape(w._id)}</code>\n`+
+      `${text4(ctx.lang, 'وضعیت', 'Status')}: <b>${status}</b>\n`+
+      `${text4(ctx.lang, 'نام کاربر', 'User')}: <b>${name}</b> (${username})\n`+
+      `${text4(ctx.lang, 'شناسه تلگرام', 'Telegram ID')}: <code>${w.userId}</code>\n`+
+      `${text4(ctx.lang, 'مبلغ کسرشده از موجودی', 'Gross amount deducted')}: <b>${formatAmount(w.amount, w.currency)} ${curName(ctx.lang, w.currency)}</b>\n`+
+      `${w.currency === 'IRT' ? text4(ctx.lang, 'کارمزد ثابت بین‌بانکی', 'Fixed interbank fee') : text4(ctx.lang, 'کارمزد ثابت شبکه TON', 'Fixed TON network fee')}: <b>${formatAmount(w.fee ?? 0, w.currency)} ${curName(ctx.lang, w.currency)}</b>\n`+
+      `${text4(ctx.lang, 'مبلغی که باید واریز شود', 'Net amount to send')}: <b>${formatAmount(w.payoutAmount ?? (w.amount - (w.fee ?? 0)), w.currency)} ${curName(ctx.lang, w.currency)}</b>\n`+
+      `${w.fullName ? `${text4(ctx.lang, 'نام و نام خانوادگی صاحب شبا', 'IBAN account holder')}: <b>${htmlEscape(w.fullName)}</b>\n` : ''}`+
+      `${w.bankName ? `${text4(ctx.lang, 'بانک تشخیص‌داده‌شده', 'Detected bank')}: <b>${htmlEscape(w.bankName)}</b>\n` : ''}`+
       `${destinationLabel}: <code>${htmlEscape(w.dest)}</code>\n`+
-      `${ctx.lang === 'fa' ? 'زمان ثبت' : 'Created'}: ${w.createdAt ? new Date(w.createdAt).toLocaleString(ctx.lang === 'fa' ? 'fa-IR' : 'en-GB') : '—'}\n`+
-      `${ctx.lang === 'fa' ? 'راهنمای پرداخت' : 'Payment instructions'}: ${w.currency === 'IRT'
-        ? (ctx.lang === 'fa' ? 'وارد همراه‌بانک شو و مبلغ خالص را به شبای مقصد واریز کن؛ سپس موفقیت انتقال را بررسی و پرداخت را تأیید کن.' : 'Use mobile banking to transfer the net amount to the destination IBAN, verify the transfer, then mark it paid.')
-        : (ctx.lang === 'fa' ? 'در Tonkeeper کیف پول و شبکه TON را بررسی کن، مبلغ خالص را به آدرس مقصد ارسال کن و پس از نهایی‌شدن تراکنش پرداخت را تأیید کن.' : 'In Tonkeeper, verify the wallet and TON network, send the net amount to the destination address, then mark it paid after finalization.')}\n`+
-      `${ctx.lang === 'fa' ? 'یادداشت' : 'Note'}: ${ctx.lang === 'fa' ? 'مبلغ هنگام ساخت فاکتور رزرو شده است؛ لغو باعث برگشت کل مبلغ رزروشده می‌شود.' : 'Funds are reserved at invoice creation; cancelling refunds the full reserved amount.'}`+
-      `${w.reviewReason ? `\n${ctx.lang === 'fa' ? 'دلیل رد' : 'Rejection reason'}: <b>${htmlEscape(w.reviewReason)}</b>` : ''}`
+      `${text4(ctx.lang, 'زمان ثبت', 'Created')}: ${w.createdAt ? new Date(w.createdAt).toLocaleString(text4(ctx.lang, 'fa-IR', 'en-GB')) : '—'}\n`+
+      `${text4(ctx.lang, 'راهنمای پرداخت', 'Payment instructions')}: ${w.currency === 'IRT'
+        ? (text4(ctx.lang, 'وارد همراه‌بانک شو و مبلغ خالص را به شبای مقصد واریز کن؛ سپس موفقیت انتقال را بررسی و پرداخت را تأیید کن.', 'Use mobile banking to transfer the net amount to the destination IBAN, verify the transfer, then mark it paid.'))
+        : (text4(ctx.lang, 'در Tonkeeper کیف پول و شبکه TON را بررسی کن، مبلغ خالص را به آدرس مقصد ارسال کن و پس از نهایی‌شدن تراکنش پرداخت را تأیید کن.', 'In Tonkeeper, verify the wallet and TON network, send the net amount to the destination address, then mark it paid after finalization.'))}\n`+
+      `${text4(ctx.lang, 'یادداشت', 'Note')}: ${text4(ctx.lang, 'مبلغ هنگام ساخت فاکتور رزرو شده است؛ لغو باعث برگشت کل مبلغ رزروشده می‌شود.', 'Funds are reserved at invoice creation; cancelling refunds the full reserved amount.')}`+
+      `${w.reviewReason ? `\n${text4(ctx.lang, 'دلیل رد', 'Rejection reason')}: <b>${htmlEscape(w.reviewReason)}</b>` : ''}`
     const markup = w.status === 'pending'
-      ? { inline_keyboard: [[{ text: ctx.lang === 'fa' ? '✅ تأیید/پرداخت' : '✅ Approve/paid', callback_data: `wda:ok:${w._id}` }, { text: ctx.lang === 'fa' ? '❌ لغو و بازگشت مبلغ' : '❌ Cancel/refund', callback_data: `wda:no:${w._id}` }], [{ text: ctx.lang === 'fa' ? '⬅️ فاکتورهای برداشت' : '⬅️ Withdrawals', callback_data: 'wdpage:0' }]] }
-      : { inline_keyboard: [[{ text: ctx.lang === 'fa' ? '⬅️ فاکتورهای برداشت' : '⬅️ Withdrawals', callback_data: 'wdpage:0' }]] }
+      ? { inline_keyboard: [[{ text: text4(ctx.lang, '✅ تأیید/پرداخت', '✅ Approve/paid'), callback_data: `wda:ok:${w._id}` }, { text: text4(ctx.lang, '❌ لغو و بازگشت مبلغ', '❌ Cancel/refund'), callback_data: `wda:no:${w._id}` }], [{ text: text4(ctx.lang, '⬅️ فاکتورهای برداشت', '⬅️ Withdrawals'), callback_data: 'wdpage:0' }]] }
+      : { inline_keyboard: [[{ text: text4(ctx.lang, '⬅️ فاکتورهای برداشت', '⬅️ Withdrawals'), callback_data: 'wdpage:0' }]] }
     await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: markup }).catch(async () => { await ctx.reply(text, { parse_mode: 'HTML', reply_markup: markup }) })
   })
 }
@@ -1352,13 +1391,13 @@ async function showWithdrawalList(ctx: BotContext, requestedPage: number, edit: 
   }
   if (pages > 1) {
     const nav: Array<{ text: string; callback_data: string }> = []
-    if (page > 0) nav.push({ text: ctx.lang === 'fa' ? '⬅️ قبلی' : '⬅️ Previous', callback_data: `wdpage:${page - 1}` })
+    if (page > 0) nav.push({ text: text4(ctx.lang, '⬅️ قبلی', '⬅️ Previous'), callback_data: `wdpage:${page - 1}` })
     nav.push({ text: `${page + 1}/${pages}`, callback_data: `wdpage:${page}` })
-    if (page + 1 < pages) nav.push({ text: ctx.lang === 'fa' ? 'بعدی ➡️' : 'Next ➡️', callback_data: `wdpage:${page + 1}` })
+    if (page + 1 < pages) nav.push({ text: text4(ctx.lang, 'بعدی ➡️', 'Next ➡️'), callback_data: `wdpage:${page + 1}` })
     keyboard.push(nav)
   }
-  keyboard.push([{ text: ctx.lang === 'fa' ? '⬅️ بازگشت به مدیریت' : '⬅️ Back to admin', callback_data: 'admin:home' }])
-  const text = total ? `${t(ctx.lang, 'admin.withdrawals_title')}\n\n${ctx.lang === 'fa' ? 'تعداد فاکتورهای منتظر:' : 'Pending invoices:'} <b>${total}</b>\n${ctx.lang === 'fa' ? 'صفحه' : 'Page'} ${page + 1}/${pages}` : t(ctx.lang, 'admin.withdrawals_empty')
+  keyboard.push([{ text: text4(ctx.lang, '⬅️ بازگشت به مدیریت', '⬅️ Back to admin'), callback_data: 'admin:home' }])
+  const text = total ? `${t(ctx.lang, 'admin.withdrawals_title')}\n\n${text4(ctx.lang, 'تعداد فاکتورهای منتظر:', 'Pending invoices:')} <b>${total}</b>\n${text4(ctx.lang, 'صفحه', 'Page')} ${page + 1}/${pages}` : t(ctx.lang, 'admin.withdrawals_empty')
   const markup = { inline_keyboard: keyboard }
   if (edit && ctx.callbackQuery?.message) await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: markup }).catch(async () => { await ctx.reply(text, { parse_mode: 'HTML', reply_markup: markup }) })
   else await ctx.reply(text, { parse_mode: 'HTML', reply_markup: markup })

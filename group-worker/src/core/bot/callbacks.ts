@@ -20,6 +20,7 @@ import {
   isOpenGroupChallenge,
   type GroupCurrency,
   type GroupMode,
+  type GroupLanguage,
 } from "../contracts/group";
 import { getFlow, reserve, release } from "../services/wallet";
 import { advanceFlow, createInvite } from "../services/duel-flow";
@@ -118,9 +119,10 @@ export async function handleCallback(update: any) {
 
   // Welcome-language selector is public; only the group activator may use it.
   if (data.startsWith("gw:lang:")) {
-    const chosen = data.split(":")[2];
+    const chosenValue = data.split(":")[2];
     const chat = msg?.chat;
-    if (!chat || (chosen !== "fa" && chosen !== "en")) return answer(q);
+    if (!chat || !["fa", "en", "ar", "es"].includes(chosenValue ?? "")) return answer(q);
+    const chosen = chosenValue as GroupLanguage;
     const chatId = String(chat.id);
     const cfg = (await GroupConfig.findOne({ chatId }).lean()) as any;
     if (!cfg || Number(cfg.activatorId) !== uid) {
@@ -300,7 +302,7 @@ export async function handleCallback(update: any) {
     }
 
     const set: Record<string, unknown> = {};
-    if (action === "lang" && (value === "fa" || value === "en"))
+    if (action === "lang" && ["fa", "en", "ar", "es"].includes(value ?? ""))
       set.language = value;
     if (action === "mode" && ["bet", "friendly", "both"].includes(value ?? ""))
       set.allowedModes = value === "both" ? ["bet", "friendly"] : [value];
@@ -368,9 +370,11 @@ export async function handleCallback(update: any) {
       const target = parts[3];
       if (!target) {
         await redis.del(`gw:flow:${uid}`);
-        await bot.api
-          .deleteMessage(Number(flow.chatId), Number(msg.ephemeral_message_id))
-          .catch(() => undefined);
+        await deleteEphemeralMessage(
+          Number(flow.chatId),
+          uid,
+          Number(msg.ephemeral_message_id),
+        ).catch(() => undefined);
         return answer(
           q,
           tr(

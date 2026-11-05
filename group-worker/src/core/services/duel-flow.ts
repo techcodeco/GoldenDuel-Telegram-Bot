@@ -9,7 +9,7 @@ import { groupModeNeedsStake, type GroupFlow, type GroupCurrency, type GroupMode
 import { sendGroupDuelNotice, deleteDuelPublicNotices } from './game-message'
 import { logError } from '../logger'
 
-async function buildStartKeyboard(lang: 'fa' | 'en') {
+async function buildStartKeyboard(lang: 'fa' | 'en' | 'ar' | 'es') {
   const configured = startKeyboard(lang)
   if (configured) return configured
   try {
@@ -32,21 +32,21 @@ function colorize<T extends { inline_keyboard?: any[][] }>(keyboard: T): T {
   return keyboard
 }
 
-function choicePromptKeyboard(lang: 'fa' | 'en') {
+function choicePromptKeyboard(lang: 'fa' | 'en' | 'ar' | 'es') {
   return colorize(new InlineKeyboard()
     .text(tr(lang, '🎲 شرطی', '🎲 Bet'), 'gw:flow:mode:bet')
     .text(tr(lang, '🤝 دوستانه', '🤝 Friendly'), 'gw:flow:mode:friendly')
     .row().text(tr(lang, '↩️ بازگشت', '↩️ Back'), 'gw:flow:back'))
 }
 
-function currencyKeyboard(lang: 'fa' | 'en') {
+function currencyKeyboard(lang: 'fa' | 'en' | 'ar' | 'es') {
   return colorize(new InlineKeyboard()
     .text(tr(lang, '💵 تومان', '💵 Toman'), 'gw:flow:cur:IRT')
     .text('💎 TON', 'gw:flow:cur:TON')
     .row().text(tr(lang, '⬅️ بازگشت به نوع رقابت', '⬅️ Back to mode'), 'gw:flow:back:mode'))
 }
 
-function amountKeyboard(amounts: number[], currency: GroupCurrency, lang: 'fa' | 'en') {
+function amountKeyboard(amounts: number[], currency: GroupCurrency, lang: 'fa' | 'en' | 'ar' | 'es') {
   const kb = new InlineKeyboard()
   amounts.slice(0, 12).forEach((amount, index) => {
     kb.text(`${fmt(amount, currency)} ${curLabel(currency, lang)}`, `gw:flow:amt:${amount}`)
@@ -231,26 +231,41 @@ export async function createInvite(uid: number, flow: GroupFlow, amount: number,
   const lang = langOf(cfg.language)
   const actorMention = mention({ id: uid, first_name: flow.actorName, username: flow.actorUsername }, lang)
   const targetMention = openChallenge ? '' : mention({ id: flow.targetId, first_name: flow.targetName, username: flow.targetUsername }, lang)
-  const modeLabel = mode === 'bet' ? tr(lang, 'شرطی', 'betting') : tr(lang, 'دوستانه', 'friendly')
+  const modeLabelFa = mode === 'bet' ? 'شرطی' : 'دوستانه'
+  const modeLabelEn = mode === 'bet' ? 'betting' : 'friendly'
+  const modeLabelAr = mode === 'bet' ? 'برهان' : 'ودي'
+  const modeLabelEs = mode === 'bet' ? 'con apuesta' : 'amistoso'
   const stakeLineFa = mode === 'bet' ? `\n💰 مبلغ هر بازیکن: <b>${fmt(stake, String(currency))} ${curLabel(String(currency), lang)}</b>` : '\n🆓 بدون شرط مالی؛ این رقابت دوستانه است.'
   const stakeLineEn = mode === 'bet' ? `\n💰 Stake per player: <b>${fmt(stake, String(currency))} ${curLabel(String(currency), lang)}</b>` : '\n🆓 No stake; this is a friendly duel.'
+  const stakeLineAr = mode === 'bet' ? `\n💰 الرهان لكل لاعب: <b>${fmt(stake, String(currency))} ${curLabel(String(currency), lang)}</b>` : '\n🆓 لا يوجد رهان؛ هذه مباراة ودية.'
+  const stakeLineEs = mode === 'bet' ? `\n💰 Apuesta por jugador: <b>${fmt(stake, String(currency))} ${curLabel(String(currency), lang)}</b>` : '\n🆓 Sin apuesta; este es un duelo amistoso.'
   const inviteText = openChallenge ? '' : tr(lang,
-    `⚔️ <b>دعوت خصوصی به رقابت ${modeLabel}</b>\n${actorMention} از شما (${targetMention}) دعوت کرده است.${stakeLineFa}\nبرای پاسخ ${timeoutSeconds} ثانیه فرصت داری.`,
-    `⚔️ <b>Private ${modeLabel} duel invitation</b>\n${actorMention} challenged you (${targetMention}).${stakeLineEn}\nYou have ${timeoutSeconds} seconds to respond.`,
+    `⚔️ <b>دعوت خصوصی به رقابت ${modeLabelFa}</b>\n${actorMention} از شما (${targetMention}) دعوت کرده است.${stakeLineFa}\nبرای پاسخ ${timeoutSeconds} ثانیه فرصت داری.`,
+    `⚔️ <b>Private ${modeLabelEn} duel invitation</b>\n${actorMention} challenged you (${targetMention}).${stakeLineEn}\nYou have ${timeoutSeconds} seconds to respond.`,
+    `⚔️ <b>دعوة خاصة إلى تحدٍّ ${modeLabelAr}</b>\n${actorMention} يدعوك (${targetMention}) للمشاركة.${stakeLineAr}\nلديك ${timeoutSeconds} ثانية للرد.`,
+    `⚔️ <b>Invitación privada a un duelo ${modeLabelEs}</b>\n${actorMention} te ha desafiado (${targetMention}).${stakeLineEs}\nTienes ${timeoutSeconds} segundos para responder.`,
   )
   const waitText = openChallenge ? tr(lang,
     `✅ <b>درخواست عمومی دوئل در گروه منتشر شد.</b>\n${stakeLineFa}\nتا ${timeoutSeconds} ثانیه منتظر اولین پذیرنده بمان یا درخواست را لغو کن.`,
     `✅ <b>Your public duel challenge was posted.</b>\n${stakeLineEn}\nWait up to ${timeoutSeconds} seconds for the first player to accept, or cancel it.`,
+    `✅ <b>تم نشر التحدي العام في المجموعة.</b>\n${stakeLineAr}\nانتظر أول لاعب يقبل خلال ${timeoutSeconds} ثانية أو ألغِ الطلب.`,
+    `✅ <b>Tu desafío público se ha publicado en el grupo.</b>\n${stakeLineEs}\nEspera hasta ${timeoutSeconds} segundos a que alguien lo acepte o cancela la solicitud.`,
   ) : tr(lang,
     `✅ دعوت خصوصی برای ${targetMention} ارسال شد.\n${stakeLineFa}\nتا پاسخ حریف منتظر بمان یا دعوت را لغو کن.`,
     `✅ A private invitation was sent to ${targetMention}.\n${stakeLineEn}\nWait for the response or cancel the invitation.`,
+    `✅ تم إرسال دعوة خاصة إلى ${targetMention}.\n${stakeLineAr}\nانتظر رد الخصم أو ألغِ الدعوة.`,
+    `✅ Se ha enviado una invitación privada a ${targetMention}.\n${stakeLineEs}\nEspera la respuesta o cancela la invitación.`,
   )
   const publicInviteText = openChallenge ? tr(lang,
-    `⚔️ ${actorMention} یک دوئل ${modeLabel} ایجاد کرده است.${stakeLineFa}\nبرای شرکت، دکمهٔ «پذیرش دوئل» را بزنید. اولین پذیرنده، حریف این رقابت خواهد بود.`,
-    `⚔️ ${actorMention} has opened a ${modeLabel} duel.${stakeLineEn}\nTap “Accept duel” to join. The first eligible player to accept becomes the opponent.`,
+    `⚔️ ${actorMention} یک دوئل ${modeLabelFa} ایجاد کرده است.${stakeLineFa}\nبرای شرکت، دکمهٔ «پذیرش دوئل» را بزنید. اولین پذیرنده، حریف این رقابت خواهد بود.`,
+    `⚔️ ${actorMention} has opened a ${modeLabelEn} duel.${stakeLineEn}\nTap “Accept duel” to join. The first eligible player to accept becomes the opponent.`,
+    `⚔️ أنشأ ${actorMention} تحدياً ${modeLabelAr}.${stakeLineAr}\nاضغط «قبول التحدي» للمشاركة. أول لاعب مؤهل يقبل يصبح الخصم.`,
+    `⚔️ ${actorMention} ha creado un duelo ${modeLabelEs}.${stakeLineEs}\nPulsa «Aceptar duelo» para participar. El primer jugador que lo acepte será el rival.`,
   ) : tr(lang,
-    `⚔️ ${actorMention} کاربر ${targetMention} را به یک دوئل ${modeLabel} دعوت کرد.${stakeLineFa}`,
-    `⚔️ ${actorMention} challenged ${targetMention} to a ${modeLabel} duel.${stakeLineEn}`,
+    `⚔️ ${actorMention} کاربر ${targetMention} را به یک دوئل ${modeLabelFa} دعوت کرد.${stakeLineFa}`,
+    `⚔️ ${actorMention} challenged ${targetMention} to a ${modeLabelEn} duel.${stakeLineEn}`,
+    `⚔️ دعا ${actorMention} اللاعب ${targetMention} إلى تحدٍّ ${modeLabelAr}.${stakeLineAr}`,
+    `⚔️ ${actorMention} ha desafiado a ${targetMention} a un duelo ${modeLabelEs}.${stakeLineEs}`,
   )
 
   let opponentCard: any

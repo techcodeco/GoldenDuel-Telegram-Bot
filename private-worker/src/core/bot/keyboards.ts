@@ -10,6 +10,9 @@ type ButtonStyle = 'primary' | 'success' | 'danger'
 type StyledButton = { text: string; style?: ButtonStyle }
 const styled = (text: string, style?: ButtonStyle): StyledButton => ({ text, ...(style ? { style } : {}) })
 const plain = (text: string): StyledButton => ({ text })
+
+const label = (lang: Lang, fa: string, en: string, ar: string, es: string) =>
+  lang === 'fa' ? fa : lang === 'ar' ? ar : lang === 'es' ? es : en
 const replyKeyboard = (keyboard: StyledButton[][]) => ({
   // These two main-menu buttons are deliberately unstyled. Strip any accidental style
   // attribute even if a caller passes a styled button object for either translation.
@@ -64,11 +67,11 @@ export const financeKeyboard = (lang: Lang) => replyKeyboard([
 
 /** Initial language picker is a reply keyboard, not an inline keyboard. */
 export const languageKeyboard = () =>
-  new Keyboard().text(t('en', 'lang.fa')).text(t('en', 'lang.en')).resized().oneTime()
+  new Keyboard().text(t('en', 'lang.fa')).text(t('en', 'lang.en')).row().text(t('en', 'lang.ar')).text(t('en', 'lang.es')).resized().oneTime()
 
 /** Inline version is used only from the Profile screen. */
 export const inlineLanguageKeyboard = () =>
-  styleInline(new InlineKeyboard().text(t('en', 'lang.fa'), 'lang:fa').text(t('en', 'lang.en'), 'lang:en'))
+  styleInline(new InlineKeyboard().text(t('en', 'lang.fa'), 'lang:fa').text(t('en', 'lang.en'), 'lang:en').row().text(t('en', 'lang.ar'), 'lang:ar').text(t('en', 'lang.es'), 'lang:es'))
 
 export const currencyKeyboard = (lang: Lang, prefix: string) => {
   const kb = new InlineKeyboard()
@@ -103,7 +106,7 @@ export const amountKeyboard = (lang: Lang, cur: Currency, amounts: number[], wai
     if (i % 2 === 1) kb.row()
   })
   if (kb.inline_keyboard[kb.inline_keyboard.length - 1]?.length) kb.row()
-  kb.text(lang === 'fa' ? '⬅️ بازگشت به انتخاب ارز' : '⬅️ Back to currency', 'dq:back')
+  kb.text(label(lang, '⬅️ بازگشت به انتخاب ارز', '⬅️ Back to currency', '⬅️ العودة إلى اختيار العملة', '⬅️ Volver a elegir moneda'), 'dq:back')
   return styleInline(kb)
 }
 
@@ -119,44 +122,44 @@ export const cancelKeyboard = (lang: Lang, ticketId: string) =>
 
 export const withdrawalBankConfirmKeyboard = (lang: Lang) => ({
   inline_keyboard: [[
-    { text: lang === 'fa' ? '✅ تأیید و ساخت فاکتور' : '✅ Confirm & create invoice', callback_data: 'wdc:yes', style: 'success' },
-    { text: lang === 'fa' ? '❌ لغو' : '❌ Cancel', callback_data: 'wdc:no', style: 'danger' },
+    { text: label(lang, '✅ تأیید و ساخت فاکتور', '✅ Confirm & create invoice', '✅ تأكيد وإنشاء الفاتورة', '✅ Confirmar y crear factura'), callback_data: 'wdc:yes', style: 'success' },
+    { text: label(lang, '❌ لغو', '❌ Cancel', '❌ إلغاء', '❌ Cancelar'), callback_data: 'wdc:no', style: 'danger' },
   ]],
 }) as any
 
 export const withdrawalTonConfirmKeyboard = (lang: Lang) => ({
   inline_keyboard: [
-    [{ text: lang === 'fa' ? '✅ تأیید و ساخت فاکتور' : '✅ Confirm & create invoice', callback_data: 'wdt:yes', style: 'success' }],
-    [{ text: lang === 'fa' ? '❌ لغو برداشت' : '❌ Cancel withdrawal', callback_data: 'wdt:no', style: 'danger' }],
+    [{ text: label(lang, '✅ تأیید و ساخت فاکتور', '✅ Confirm & create invoice', '✅ تأكيد وإنشاء الفاتورة', '✅ Confirmar y crear factura'), callback_data: 'wdt:yes', style: 'success' }],
+    [{ text: label(lang, '❌ لغو برداشت', '❌ Cancel withdrawal', '❌ إلغاء السحب', '❌ Cancelar retiro'), callback_data: 'wdt:no', style: 'danger' }],
   ],
 }) as any
 
 export const broadcastAudienceKeyboard = (lang: Lang) =>
   styleInline(new InlineKeyboard()
-    .text(lang === 'fa' ? '👤 کاربران' : '👤 Users', 'bc:aud:users')
-    .text(lang === 'fa' ? '👥 گروه‌ها' : '👥 Groups', 'bc:aud:groups')
+    .text(label(lang, '👤 کاربران', '👤 Users', '👤 المستخدمون', '👤 Usuarios'), 'bc:aud:users')
+    .text(label(lang, '👥 گروه‌ها', '👥 Groups', '👥 المجموعات', '👥 Grupos'), 'bc:aud:groups')
     .row()
-    .text(lang === 'fa' ? '👤 + 👥 کاربران و گروه‌ها' : '👤 + 👥 Users and groups', 'bc:aud:both'))
+    .text(label(lang, '👤 + 👥 کاربران و گروه‌ها', '👤 + 👥 Users and groups', '👤 + 👥 المستخدمون والمجموعات', '👤 + 👥 Usuarios y grupos'), 'bc:aud:both'))
 
 export const broadcastUserFilterKeyboard = (lang: Lang) =>
   styleInline(new InlineKeyboard()
-    .text(lang === 'fa' ? 'همه کاربران واجد شرایط' : 'All eligible users', 'bc:uf:all')
-    .text(lang === 'fa' ? 'فقط N کاربر اول' : 'First N users', 'bc:uf:limit')
+    .text(label(lang, 'همه کاربران واجد شرایط', 'All eligible users', 'جميع المستخدمين المؤهلين', 'Todos los usuarios aptos'), 'bc:uf:all')
+    .text(label(lang, 'فقط N کاربر اول', 'First N users', 'أول N مستخدمين فقط', 'Solo los primeros N usuarios'), 'bc:uf:limit')
     .row()
-    .text(lang === 'fa' ? 'فیلتر موجودی TON/گرام یا تومان' : 'Filter current TON/IRT balance', 'bc:uf:balance')
+    .text(label(lang, 'فیلتر موجودی TON/گرام یا تومان', 'Filter current TON/IRT balance', 'تصفية حسب رصيد TON أو التومان', 'Filtrar por saldo actual de TON o Toman'), 'bc:uf:balance')
     .row()
-    .text(lang === 'fa' ? 'فیلتر تعداد زیرمجموعه' : 'Filter referral count', 'bc:uf:referrals')
+    .text(label(lang, 'فیلتر تعداد زیرمجموعه', 'Filter referral count', 'تصفية حسب عدد الإحالات', 'Filtrar por número de referidos'), 'bc:uf:referrals')
     .row()
-    .text(lang === 'fa' ? 'فیلتر جمع واریزها' : 'Filter total deposits', 'bc:uf:deposits')
-    .text(lang === 'fa' ? 'فیلتر جمع برداشت‌ها' : 'Filter total withdrawals', 'bc:uf:withdrawals')
+    .text(label(lang, 'فیلتر جمع واریزها', 'Filter total deposits', 'تصفية حسب إجمالي الإيداعات', 'Filtrar por depósitos totales'), 'bc:uf:deposits')
+    .text(label(lang, 'فیلتر جمع برداشت‌ها', 'Filter total withdrawals', 'تصفية حسب إجمالي السحوبات', 'Filtrar por retiros totales'), 'bc:uf:withdrawals')
     .row()
-    .text(lang === 'fa' ? '⬅️ لغو' : '⬅️ Cancel', 'bc:cancel'))
+    .text(label(lang, '⬅️ لغو', '⬅️ Cancel', '⬅️ إلغاء', '⬅️ Cancelar'), 'bc:cancel'))
 
 export const broadcastConfirmKeyboard = (lang: Lang) =>
   styleInline(new InlineKeyboard()
-    .text(lang === 'fa' ? '🚀 تأیید و شروع ارسال' : '🚀 Confirm and start', 'bc:confirm')
+    .text(label(lang, '🚀 تأیید و شروع ارسال', '🚀 Confirm and start', '🚀 تأكيد وبدء الإرسال', '🚀 Confirmar e iniciar'), 'bc:confirm')
     .row()
-    .text(lang === 'fa' ? '❌ لغو کمپین' : '❌ Cancel campaign', 'bc:cancel'))
+    .text(label(lang, '❌ لغو کمپین', '❌ Cancel campaign', '❌ إلغاء الحملة', '❌ Cancelar campaña'), 'bc:cancel'))
 
 export const profileKeyboard = (lang: Lang, section: 'home' | 'duels' | 'finance' = 'home', txPage = 0, txPages = 1) => {
   const kb = new InlineKeyboard()
@@ -166,9 +169,9 @@ export const profileKeyboard = (lang: Lang, section: 'home' | 'duels' | 'finance
   else kb.row().text(t(lang, 'profile.btn_home'), 'profile:home').text(t(lang, 'profile.btn_language'), 'profile:language')
   if ((section === 'home' || section === 'finance') && txPages > 1) {
     kb.row()
-    if (txPage > 0) kb.text(lang === 'fa' ? '⬅️ قبلی' : '⬅️ Previous', `profile:tx:${txPage - 1}`)
-    kb.text(lang === 'fa' ? `📜 صفحه ${txPage + 1}/${txPages}` : `📜 Page ${txPage + 1}/${txPages}`, `profile:tx:${txPage}`)
-    if (txPage + 1 < txPages) kb.text(lang === 'fa' ? 'بعدی ➡️' : 'Next ➡️', `profile:tx:${txPage + 1}`)
+    if (txPage > 0) kb.text(label(lang, '⬅️ قبلی', '⬅️ Previous', '⬅️ السابق', '⬅️ Anterior'), `profile:tx:${txPage - 1}`)
+    kb.text(label(lang, `📜 صفحه ${txPage + 1}/${txPages}`, `📜 Page ${txPage + 1}/${txPages}`, `📜 الصفحة ${txPage + 1}/${txPages}`, `📜 Página ${txPage + 1}/${txPages}`), `profile:tx:${txPage}`)
+    if (txPage + 1 < txPages) kb.text(label(lang, 'بعدی ➡️', 'Next ➡️', 'التالي ➡️', 'Siguiente ➡️'), `profile:tx:${txPage + 1}`)
   }
   return styleInline(kb)
 }
@@ -180,9 +183,9 @@ export const adminMenuKeyboard = (lang: Lang, showOwnerInvoices = false) => {
     .row()
     .text(t(lang, 'admin.btn_invoices'), 'admin:invoices')
   if (showOwnerInvoices) kb.row().text(t(lang, 'admin.btn_withdrawals'), 'admin:withdrawals')
-  if (showOwnerInvoices) kb.row().text(lang === 'fa' ? '📣 پیام انبوه' : '📣 Broadcast', 'admin:broadcast')
-  if (showOwnerInvoices) kb.row().text(lang === 'fa' ? '🛰 مدیریت وضعیت سرورها' : '🛰 Server Status', 'admin:servers')
-  if (showOwnerInvoices) kb.row().text(lang === 'fa' ? '🗄 مدیریت بکاپ‌ها' : '🗄 Backup management', 'admin:backups')
+  if (showOwnerInvoices) kb.row().text(label(lang, '📣 پیام انبوه', '📣 Broadcast', '📣 الإرسال الجماعي', '📣 Difusión'), 'admin:broadcast')
+  if (showOwnerInvoices) kb.row().text(label(lang, '🛰 مدیریت وضعیت سرورها', '🛰 Server Status', '🛰 حالة الخوادم', '🛰 Estado de servidores'), 'admin:servers')
+  if (showOwnerInvoices) kb.row().text(label(lang, '🗄 مدیریت بکاپ‌ها', '🗄 Backup management', '🗄 إدارة النسخ الاحتياطية', '🗄 Gestión de copias'), 'admin:backups')
   kb.row()
     .text(t(lang, 'admin.btn_channels'), 'admin:channels')
     .text(t(lang, 'admin.btn_commands'), 'admin:commands')
@@ -266,7 +269,7 @@ export const adminSettingsKeyboard = (s: Settings) =>
 export const membershipKeyboard = (channels: Array<{ title: string; url: string; kind?: 'channel' | 'group' | 'supergroup' }>, lang: Lang) => {
   const kb = new InlineKeyboard()
   for (const ch of channels) kb.url(`${ch.kind && ch.kind !== 'channel' ? '👥' : '📢'} ${truncateCodePoints(ch.title, 45)}`, ch.url).row()
-  kb.text(lang === 'fa' ? '✅ بررسی عضویت' : '✅ Check membership', 'membership:check')
+  kb.text(label(lang, '✅ بررسی عضویت', '✅ Check membership', '✅ التحقق من العضوية', '✅ Comprobar membresía'), 'membership:check')
   return styleInline(kb)
 }
 

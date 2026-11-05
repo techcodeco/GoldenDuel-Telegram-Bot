@@ -57,11 +57,36 @@ export async function startGroupWorker() {
   const ack = async (id: string) => redis.xack(STREAM, GROUP, id);
   const processEntries = async (entries: any[]) => {
     for (const [id, values] of entries) {
+      const fields: Record<string, string> = {};
+      for (let i = 0; i < (values ?? []).length; i += 2)
+        fields[values[i]] = values[i + 1];
+
+      // A Telegram update can be re-published or reclaimed after the handler
+      // completed but before XACK. Deduplicate by Telegram update_id, not the
+      // Redis Stream entry id (which changes on republish).
+      const updateId = String(fields.u ?? '').trim();
+      const doneKey = updateId ? `dd:group:${updateId}` : '';
+      const lockKey = updateId ? `dd:group:processing:${updateId}` : '';
+      const lockOwner = `${CONSUMER}:${id}`;
+      let ownsLock = false;
       try {
-        const fields: Record<string, string> = {};
-        for (let i = 0; i < values.length; i += 2)
-          fields[values[i]] = values[i + 1];
+        if (doneKey && await redis.exists(doneKey)) {
+          await ack(id);
+          await redis.del(`gw:fail:${id}`);
+          continue;
+        }
+        if (lockKey) {
+          const acquired = await redis.set(lockKey, lockOwner, 'EX', 600, 'NX');
+          if (acquired !== 'OK') {
+            // Leave it pending. The owner may still finish; a later reclaim
+            // will see doneKey and ACK this duplicate safely.
+            continue;
+          }
+          ownsLock = true;
+        }
+
         await handleUpdate(fields);
+        if (doneKey) await redis.set(doneKey, '1', 'EX', 86_400);
         await ack(id);
         await redis.del(`gw:fail:${id}`);
       } catch (error) {
@@ -70,6 +95,7 @@ export async function startGroupWorker() {
         logError("stream_update_failed", error, {
           stream: STREAM,
           entryId: id,
+          updateId: updateId || undefined,
           attempts: failures,
         });
         if (failures >= 5) {
@@ -92,8 +118,18 @@ export async function startGroupWorker() {
                 entryId: id,
               }),
             );
+          // A terminally dead-lettered update must not execute through another
+          // duplicate stream entry in the same retention window.
+          if (doneKey) await redis.set(doneKey, 'dead-lettered', 'EX', 86_400);
           await ack(id);
           await redis.del(`gw:fail:${id}`);
+        }
+      } finally {
+        if (ownsLock && lockKey) {
+          await (redis as any).eval(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+            1, lockKey, lockOwner,
+          ).catch((error: unknown) => logError('group_update_lock_release_failed', error, { updateId }));
         }
       }
     }
@@ -128,36 +164,47 @@ export async function startGroupWorker() {
   })();
 
   let reclaimBusy = false;
+  let autoClaimSupported: boolean | null = null;
+  const reclaimLegacy = async () => {
+    const pending = await (redis as any).xpending(STREAM, GROUP, '-', '+', 100) as Array<[string, string, number, number]>;
+    const ids = pending.filter((row) => Number(row[2]) >= 60_000).map((row) => row[0]);
+    if (!ids.length) return;
+    const claimed = await (redis as any).xclaim(STREAM, GROUP, CONSUMER, 60_000, ...ids);
+    if (claimed?.length) await processEntries(claimed);
+  };
   const reclaim = setInterval(async () => {
     if (reclaimBusy || !running) return;
     reclaimBusy = true;
     try {
+      if (autoClaimSupported === false) {
+        await reclaimLegacy();
+        return;
+      }
       let cursor = "0-0";
       for (let i = 0; i < 5; i++) {
-        const result = await (redis as any).xautoclaim(
-          STREAM,
-          GROUP,
-          CONSUMER,
-          60_000,
-          cursor,
-          "COUNT",
-          100,
-        );
-        cursor = result[0];
-        if (result[1]?.length) await processEntries(result[1]);
-        if (cursor === "0-0") break;
+        try {
+          const result = await (redis as any).xautoclaim(
+            STREAM, GROUP, CONSUMER, 60_000, cursor, "COUNT", 100,
+          );
+          autoClaimSupported = true;
+          cursor = result[0];
+          if (result[1]?.length) await processEntries(result[1]);
+          if (cursor === "0-0") break;
+        } catch (error: any) {
+          const message = String(error?.message ?? error);
+          if (/unknown command.*xautoclaim|xautoclaim.*unknown command|unsupported.*xautoclaim|xautoclaim.*unsupported|not supported.*xautoclaim|syntax error/i.test(message)) {
+            autoClaimSupported = false;
+            await reclaimLegacy();
+            break;
+          }
+          throw error;
+        }
       }
     } catch (error: any) {
-      if (
-        !/unknown command.*xautoclaim|xautoclaim.*unknown command|syntax error/i.test(
-          String(error?.message ?? error),
-        )
-      ) {
-        logError("stream_pending_reclaim_failed", error, {
-          stream: STREAM,
-          consumer: CONSUMER,
-        });
-      }
+      logError("stream_pending_reclaim_failed", error, {
+        stream: STREAM,
+        consumer: CONSUMER,
+      });
     } finally {
       reclaimBusy = false;
     }
