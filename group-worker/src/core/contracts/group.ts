@@ -18,6 +18,8 @@ export interface GroupFlow {
   currency: GroupCurrency | null
   step: 'mode' | 'currency' | 'amount'
   triggerMessageId?: number
+  /** Original message being replied to; used as context for the target-only invitation. */
+  targetMessageId?: number
   formMessageId?: number
 }
 
@@ -50,6 +52,30 @@ export function groupDuelHasStake(duel: { mode?: unknown; currency?: unknown; am
     && (duel.currency === 'IRT' || duel.currency === 'TON')
 }
 
+
+
+/** A flow without a reply target is a public/open challenge. */
+export function isOpenGroupFlow(flow: { openChallenge?: unknown; targetId?: unknown }): boolean {
+  // An explicit flag is authoritative. In particular, a direct challenge must
+  // fail closed rather than become public if its target ID is ever missing.
+  if (typeof flow.openChallenge === 'boolean') return flow.openChallenge
+  // Backward compatibility for flows created before openChallenge was stored.
+  return Number(flow.targetId ?? 0) <= 0
+}
+
+/**
+ * All invitations are announced in the group. Only open challenges expose a
+ * public accept button; a reply-targeted invitation is accepted/rejected only
+ * through an ephemeral form addressed to the selected target.
+ */
+export function groupInvitationDelivery(flow: { openChallenge?: unknown; targetId?: unknown }) {
+  const openChallenge = isOpenGroupFlow(flow)
+  return {
+    publicAnnouncement: true as const,
+    publicAcceptButton: openChallenge,
+    privateAcceptForm: !openChallenge,
+  }
+}
 
 /** Open group challenges have no preselected opponent until the first valid acceptance. */
 export function isOpenGroupChallenge(duel: { openChallenge?: unknown; opponentId?: unknown }): boolean {

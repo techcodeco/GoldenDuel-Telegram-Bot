@@ -35,6 +35,8 @@ const GROUP_WORDS = new Set([
   "داشبورد",
   "challenge",
   "/challenge",
+  "challange",
+  "/challange",
   "چالنج",
   "چالش",
   "چلنج",

@@ -108,6 +108,6 @@ export async function handleUpdate(fields: Record<string, string>) {
       }
       return
     }
-    await beginFlow(chatId, m.from, reply.from, Number(m.message_id))
+    await beginFlow(chatId, m.from, reply.from, Number(m.message_id), Number(reply.message_id))
   }
 }

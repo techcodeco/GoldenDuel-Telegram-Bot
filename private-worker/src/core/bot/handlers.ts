@@ -191,7 +191,7 @@ async function applyLanguageAndShowMenu(
   }
 
   if (initialLanguage || bonusPending) {
-    const currency: Currency = text4(lang, "IRT", "TON");
+    const currency: Currency = lang === "fa" ? "IRT" : "TON";
     const bonus = await grantRegistrationBonus(
       ctx.from!.id,
       currency,
@@ -229,21 +229,13 @@ async function finalizeWithdrawalDecision(
   );
   if (!result) {
     await ctx.reply(
-      text4(
-        ctx.lang,
-        "ℹ️ این فاکتور قبلاً بررسی شده یا پیدا نشد.",
-        "ℹ️ This invoice was already reviewed or could not be found.",
-      ),
+      text4(ctx.lang, "ℹ️ این فاکتور قبلاً بررسی شده یا پیدا نشد.", "ℹ️ This invoice was already reviewed or could not be found."),
     );
     return false;
   }
   const finalStatus = approve
     ? text4(ctx.lang, "✅ پرداخت‌شده", "✅ Paid")
-    : text4(
-        ctx.lang,
-        "❌ رد شده و مبلغ برگشت داده شد",
-        "❌ Rejected and refunded",
-      );
+    : text4(ctx.lang, "❌ رد شده و مبلغ برگشت داده شد", "❌ Rejected and refunded");
   const statusLabel = text4(ctx.lang, "وضعیت", "Status");
   const base = origin?.originalText ?? "";
   const statusPattern = /(?:وضعیت|Status|الحالة|Estado): <b>[^<]*<\/b>/;
@@ -255,16 +247,8 @@ async function finalizeWithdrawalDecision(
   }
   updated += `\n\n${
     approve
-      ? text4(
-          ctx.lang,
-          "✅ مبلغ از موجودی رزروشده تسویه شد.",
-          "✅ Reserved funds were settled.",
-        )
-      : text4(
-          ctx.lang,
-          "↩️ مبلغ به موجودی قابل استفاده کاربر برگشت.",
-          "↩️ Funds were refunded to the user.",
-        )
+      ? text4(ctx.lang, "✅ مبلغ از موجودی رزروشده تسویه شد.", "✅ Reserved funds were settled.")
+      : text4(ctx.lang, "↩️ مبلغ به موجودی قابل استفاده کاربر برگشت.", "↩️ Funds were refunded to the user.")
   }`;
   if (origin) {
     await ctx.api
@@ -274,11 +258,8 @@ async function finalizeWithdrawalDecision(
           inline_keyboard: [
             [
               {
-                text: text4(
-                  ctx.lang,
-                  "⬅️ فاکتورهای برداشت",
-                  "⬅️ Withdrawal invoices",
-                ),
+                text:
+                  text4(ctx.lang, "⬅️ فاکتورهای برداشت", "⬅️ Withdrawal invoices"),
                 callback_data: "admin:withdrawals",
               },
             ],
@@ -734,11 +715,8 @@ export function registerHandlers(): void {
     ) {
       await quiet(
         ctx.answerCallbackQuery({
-          text: text4(
-            ctx.lang,
-            "این دکمه برای شما معتبر نیست یا دوئل پیدا نشد.",
-            "This rematch button is invalid or the duel could not be found.",
-          ),
+          text:
+            text4(ctx.lang, "این دکمه برای شما معتبر نیست یا دوئل پیدا نشد.", "This rematch button is invalid or the duel could not be found."),
           show_alert: true,
         }),
       );
@@ -855,11 +833,8 @@ export function registerHandlers(): void {
       logError("rematch_start_failed", error, { matchId, userId: ctx.from.id });
       await quiet(
         ctx.answerCallbackQuery({
-          text: text4(
-            ctx.lang,
-            "شروع دوباره انجام نشد؛ دوباره تلاش کن.",
-            "Could not start the rematch. Please try again.",
-          ),
+          text:
+            text4(ctx.lang, "شروع دوباره انجام نشد؛ دوباره تلاش کن.", "Could not start the rematch. Please try again."),
           show_alert: true,
         }),
       );
@@ -957,11 +932,8 @@ export function registerHandlers(): void {
     if (canCheck !== "OK") {
       await quiet(
         ctx.answerCallbackQuery({
-          text: text4(
-            ctx.lang,
-            "کمی صبر کن و دوباره بررسی کن.",
-            "Please wait a moment before checking again.",
-          ),
+          text:
+            text4(ctx.lang, "کمی صبر کن و دوباره بررسی کن.", "Please wait a moment before checking again."),
           show_alert: true,
         }),
       );
@@ -1064,11 +1036,8 @@ export function registerHandlers(): void {
     if (lockAcquired !== "OK") {
       await quiet(
         ctx.answerCallbackQuery({
-          text: text4(
-            ctx.lang,
-            "درخواست برداشت در حال ثبت است.",
-            "Withdrawal is already being registered.",
-          ),
+          text:
+            text4(ctx.lang, "درخواست برداشت در حال ثبت است.", "Withdrawal is already being registered."),
           show_alert: true,
         }),
       );
@@ -1098,11 +1067,8 @@ export function registerHandlers(): void {
     if (lockAcquired !== "OK") {
       await quiet(
         ctx.answerCallbackQuery({
-          text: text4(
-            ctx.lang,
-            "درخواست برداشت در حال ثبت است.",
-            "Withdrawal is already being registered.",
-          ),
+          text:
+            text4(ctx.lang, "درخواست برداشت در حال ثبت است.", "Withdrawal is already being registered."),
           show_alert: true,
         }),
       );
@@ -1190,11 +1156,8 @@ export function registerHandlers(): void {
           amount: formatAmount(st.amount, "IRT"),
           fee: formatAmount(fee, "IRT"),
           payout: formatAmount(payoutAmount, "IRT"),
-          feeReason: text4(
-            ctx.lang,
-            "کارمزد ثابت بین‌بانکی",
-            "Fixed interbank fee",
-          ),
+          feeReason:
+            text4(ctx.lang, "کارمزد ثابت بین‌بانکی", "Fixed interbank fee"),
           cur: curName(ctx.lang, "IRT"),
         },
         {
@@ -1229,11 +1192,8 @@ export function registerHandlers(): void {
     if (lockAcquired !== "OK") {
       await quiet(
         ctx.answerCallbackQuery({
-          text: text4(
-            ctx.lang,
-            "درخواست برداشت در حال ثبت است.",
-            "Withdrawal is already being registered.",
-          ),
+          text:
+            text4(ctx.lang, "درخواست برداشت در حال ثبت است.", "Withdrawal is already being registered."),
           show_alert: true,
         }),
       );
@@ -1329,11 +1289,8 @@ export function registerHandlers(): void {
           amount: formatAmount(st.amount, "TON"),
           fee: formatAmount(fee, "TON"),
           payout: formatAmount(payoutAmount, "TON"),
-          feeReason: text4(
-            ctx.lang,
-            "کارمزد ثابت شبکه TON",
-            "Fixed TON network fee",
-          ),
+          feeReason:
+            text4(ctx.lang, "کارمزد ثابت شبکه TON", "Fixed TON network fee"),
           cur: curName(ctx.lang, "TON"),
         },
         {
@@ -1363,11 +1320,8 @@ export function registerHandlers(): void {
     if (ctx.u?.role !== "owner" && !OWNER_IDS.has(ctx.from.id)) {
       await quiet(
         ctx.answerCallbackQuery({
-          text: text4(
-            ctx.lang,
-            "فقط مالک می‌تواند فاکتور برداشت را بررسی کند.",
-            "Only the owner can review withdrawal invoices.",
-          ),
+          text:
+            text4(ctx.lang, "فقط مالک می‌تواند فاکتور برداشت را بررسی کند.", "Only the owner can review withdrawal invoices."),
           show_alert: true,
         }),
       );
@@ -1541,87 +1495,39 @@ ${text4(ctx.lang, "🎁 درآمد پاداش فعال‌سازی گروه: ", "
     if (transactionCount) {
       const labelsByLang: Record<Lang, Record<string, string>> = {
         fa: {
-          deposit: "واریز",
-          referral: "پاداش زیرمجموعه",
-          registration_bonus: "بونوس ثبت‌نام",
-          withdraw_hold: "درخواست برداشت",
-          withdraw_paid: "برداشت پرداخت‌شده",
-          withdraw_rejected: "برداشت ردشده",
-          hold: "رزرو شرط",
-          unhold: "بازگشت شرط",
-          settle: "تسویه دوئل",
-          admin_adjust: "اصلاح توسط مدیر",
-          profanity_penalty: "جریمه کلمه فیلترشده",
-          group_reward: "پاداش فعال‌سازی گروه",
-          group_reserve: "رزرو دوئل گروهی",
-          group_release: "آزادسازی دوئل گروهی",
-          group_bet: "تسویه دوئل گروهی",
-          group_friendly: "پایان دوئل دوستانه گروهی",
+          deposit: "واریز", referral: "پاداش زیرمجموعه", registration_bonus: "بونوس ثبت‌نام",
+          withdraw_hold: "درخواست برداشت", withdraw_paid: "برداشت پرداخت‌شده", withdraw_rejected: "برداشت ردشده",
+          hold: "رزرو شرط", unhold: "بازگشت شرط", settle: "تسویه دوئل", admin_adjust: "اصلاح توسط مدیر",
+          profanity_penalty: "جریمه کلمه فیلترشده", group_reward: "پاداش فعال‌سازی گروه", group_reserve: "رزرو دوئل گروهی",
+          group_release: "آزادسازی دوئل گروهی", group_bet: "تسویه دوئل گروهی", group_friendly: "پایان دوئل دوستانه گروهی",
         },
         en: {
-          deposit: "Deposit",
-          referral: "Referral reward",
-          registration_bonus: "Signup bonus",
-          withdraw_hold: "Withdrawal request",
-          withdraw_paid: "Withdrawal paid",
-          withdraw_rejected: "Withdrawal rejected",
-          hold: "Bet reserved",
-          unhold: "Bet refunded",
-          settle: "Duel settlement",
-          admin_adjust: "Admin adjustment",
-          profanity_penalty: "Filtered-word penalty",
-          group_reward: "Group activation reward",
-          group_reserve: "Group duel reserve",
-          group_release: "Group duel release",
-          group_bet: "Group duel settlement",
-          group_friendly: "Group friendly duel",
+          deposit: "Deposit", referral: "Referral reward", registration_bonus: "Signup bonus",
+          withdraw_hold: "Withdrawal request", withdraw_paid: "Withdrawal paid", withdraw_rejected: "Withdrawal rejected",
+          hold: "Bet reserved", unhold: "Bet refunded", settle: "Duel settlement", admin_adjust: "Admin adjustment",
+          profanity_penalty: "Filtered-word penalty", group_reward: "Group activation reward", group_reserve: "Group duel reserve",
+          group_release: "Group duel release", group_bet: "Group duel settlement", group_friendly: "Group friendly duel",
         },
         ar: {
-          deposit: "إيداع",
-          referral: "مكافأة إحالة",
-          registration_bonus: "مكافأة التسجيل",
-          withdraw_hold: "طلب سحب",
-          withdraw_paid: "تم دفع السحب",
-          withdraw_rejected: "رُفض السحب",
-          hold: "حجز الرهان",
-          unhold: "إعادة الرهان",
-          settle: "تسوية المواجهة",
-          admin_adjust: "تعديل إداري",
-          profanity_penalty: "غرامة كلمة محظورة",
-          group_reward: "مكافأة تفعيل المجموعة",
-          group_reserve: "حجز مواجهة المجموعة",
-          group_release: "تحرير رصيد مواجهة المجموعة",
-          group_bet: "تسوية مواجهة المجموعة",
-          group_friendly: "انتهاء المواجهة الودية للمجموعة",
+          deposit: "إيداع", referral: "مكافأة إحالة", registration_bonus: "مكافأة التسجيل",
+          withdraw_hold: "طلب سحب", withdraw_paid: "تم دفع السحب", withdraw_rejected: "رُفض السحب",
+          hold: "حجز الرهان", unhold: "إعادة الرهان", settle: "تسوية المواجهة", admin_adjust: "تعديل إداري",
+          profanity_penalty: "غرامة كلمة محظورة", group_reward: "مكافأة تفعيل المجموعة", group_reserve: "حجز مواجهة المجموعة",
+          group_release: "تحرير رصيد مواجهة المجموعة", group_bet: "تسوية مواجهة المجموعة", group_friendly: "انتهاء المواجهة الودية للمجموعة",
         },
         es: {
-          deposit: "Depósito",
-          referral: "Recompensa por referido",
-          registration_bonus: "Bono de registro",
-          withdraw_hold: "Solicitud de retirada",
-          withdraw_paid: "Retirada pagada",
-          withdraw_rejected: "Retirada rechazada",
-          hold: "Apuesta reservada",
-          unhold: "Apuesta devuelta",
-          settle: "Liquidación del duelo",
-          admin_adjust: "Ajuste del administrador",
-          profanity_penalty: "Penalización por palabra filtrada",
-          group_reward: "Recompensa por activar el grupo",
-          group_reserve: "Reserva de duelo grupal",
-          group_release: "Liberación de duelo grupal",
-          group_bet: "Liquidación de duelo grupal",
-          group_friendly: "Fin del duelo amistoso grupal",
+          deposit: "Depósito", referral: "Recompensa por referido", registration_bonus: "Bono de registro",
+          withdraw_hold: "Solicitud de retirada", withdraw_paid: "Retirada pagada", withdraw_rejected: "Retirada rechazada",
+          hold: "Apuesta reservada", unhold: "Apuesta devuelta", settle: "Liquidación del duelo", admin_adjust: "Ajuste del administrador",
+          profanity_penalty: "Penalización por palabra filtrada", group_reward: "Recompensa por activar el grupo", group_reserve: "Reserva de duelo grupal",
+          group_release: "Liberación de duelo grupal", group_bet: "Liquidación de duelo grupal", group_friendly: "Fin del duelo amistoso grupal",
         },
       };
       const labels = labelsByLang[ctx.lang];
-      const pageLabel =
-        ctx.lang === "fa"
-          ? `صفحه ${txPage + 1} از ${txPages}`
-          : ctx.lang === "ar"
-            ? `الصفحة ${txPage + 1} من ${txPages}`
-            : ctx.lang === "es"
-              ? `Página ${txPage + 1} de ${txPages}`
-              : `Page ${txPage + 1} of ${txPages}`;
+      const pageLabel = ctx.lang === "fa" ? `صفحه ${txPage + 1} از ${txPages}`
+        : ctx.lang === "ar" ? `الصفحة ${txPage + 1} من ${txPages}`
+        : ctx.lang === "es" ? `Página ${txPage + 1} de ${txPages}`
+        : `Page ${txPage + 1} of ${txPages}`;
       text += `\n\n${text4(ctx.lang, "📜 <b>سابقه تراکنش‌ها</b>", "📜 <b>Transaction history</b>")} · ${pageLabel}`;
       for (const row of rows) {
         const cur = row.currency as Currency;
@@ -1686,33 +1592,25 @@ async function runButton(ctx: any, btn: ButtonKey): Promise<void> {
       const me = await bot.api.getMe();
       if (!me.username) {
         return void (await ctx.reply(
-          text4(
-            lang,
-            "⚠️ برای ساخت لینک افزودن گروه، نام کاربری عمومی ربات تنظیم نشده است.",
-            "⚠️ The bot does not have a public username, so a group-add link cannot be created.",
-          ),
+          text4(lang, "⚠️ برای ساخت لینک افزودن گروه، نام کاربری عمومی ربات تنظیم نشده است.", "⚠️ The bot does not have a public username, so a group-add link cannot be created."),
         ));
       }
       const url = `https://t.me/${me.username}?startgroup&admin=delete_messages`;
-      const addGroupText =
-        lang === "fa"
-          ? "🎯 <b>گروهت رو به میدان دوئل و درآمد تبدیل کن!</b>\n\n🤝 ربات <b>دوئل طلایی</b> رو به گروهت اضافه کن تا اعضا بتونن داخل گروه با هم دوئل دوستانه یا شرطی برگزار کنن.\n\n💰 <b>پاداش میزبانی گروه:</b> بابت دوئل‌های شرطیِ واجد شرایط که در گروهت تکمیل می‌شن، سهم پاداش میزبان بر اساس کارمزد و درصد تعیین‌شده محاسبه می‌شه و مستقیم به موجودی کیف پولت در ربات اضافه می‌شه.\n\n⚡️ راه‌اندازی آسونه؛ ربات رو به گروه اضافه کن، دسترسی‌های لازم رو بده و از رقابت اعضای گروهت لذت ببر!"
-          : lang === "ar"
-            ? "🎯 <b>حوّل مجموعتك إلى ساحة للمواجهات والمكافآت!</b>\n\n🤝 أضف <b>Golden Duel</b> إلى مجموعتك ليتمكن الأعضاء من خوض مواجهات ودية أو برهانات داخل المجموعة.\n\n💰 <b>مكافآت استضافة المجموعة:</b> في المواجهات المؤهلة ذات الرهان التي تكتمل في مجموعتك، تُحسب حصة المضيف وفق الرسوم ونسبة المكافأة المحددة، ثم تُضاف مباشرة إلى رصيد محفظتك في الروبوت.\n\n⚡️ الإعداد سهل: أضف الروبوت إلى المجموعة، وامنحه الصلاحيات المطلوبة، واستمتع بمنافسات الأعضاء!"
-            : lang === "es"
-              ? "🎯 <b>¡Convierte tu grupo en un espacio de duelos y recompensas!</b>\n\n🤝 Añade <b>Golden Duel</b> a tu grupo para que sus miembros puedan jugar duelos amistosos o con apuesta directamente allí.\n\n💰 <b>Recompensas por alojar el grupo:</b> En los duelos con apuesta que cumplan los requisitos y terminen en tu grupo, la parte del anfitrión se calcula según la comisión y el porcentaje configurado, y se añade directamente al saldo de tu cartera del bot.\n\n⚡️ Es sencillo: añade el bot al grupo, concede los permisos necesarios y disfruta de la competición."
-              : "🎯 <b>Turn your group into a duel arena with rewards!</b>\n\n🤝 Add <b>Golden Duel</b> to your group so members can play friendly or wager duels right inside the group.\n\n💰 <b>Group host rewards:</b> For eligible wager duels completed in your group, the host share is calculated from the fee and configured reward rate, then credited directly to your bot wallet balance.\n\n⚡️ Setup is simple: add the bot, grant the required permissions, and let your group enjoy the competition!";
+      const addGroupText = lang === "fa"
+        ? "🎯 <b>گروهت رو به میدان دوئل و درآمد تبدیل کن!</b>\n\n🤝 ربات <b>دوئل طلایی</b> رو به گروهت اضافه کن تا اعضا بتونن داخل گروه با هم دوئل دوستانه یا شرطی برگزار کنن.\n\n💰 <b>پاداش میزبانی گروه:</b> بابت دوئل‌های شرطیِ واجد شرایط که در گروهت تکمیل می‌شن، سهم پاداش میزبان بر اساس کارمزد و درصد تعیین‌شده محاسبه می‌شه و مستقیم به موجودی کیف پولت در ربات اضافه می‌شه.\n\n⚡️ راه‌اندازی آسونه؛ ربات رو به گروه اضافه کن، دسترسی‌های لازم رو بده و از رقابت اعضای گروهت لذت ببر!"
+        : lang === "ar"
+          ? "🎯 <b>حوّل مجموعتك إلى ساحة للمواجهات والمكافآت!</b>\n\n🤝 أضف <b>Golden Duel</b> إلى مجموعتك ليتمكن الأعضاء من خوض مواجهات ودية أو برهانات داخل المجموعة.\n\n💰 <b>مكافآت استضافة المجموعة:</b> في المواجهات المؤهلة ذات الرهان التي تكتمل في مجموعتك، تُحسب حصة المضيف وفق الرسوم ونسبة المكافأة المحددة، ثم تُضاف مباشرة إلى رصيد محفظتك في الروبوت.\n\n⚡️ الإعداد سهل: أضف الروبوت إلى المجموعة، وامنحه الصلاحيات المطلوبة، واستمتع بمنافسات الأعضاء!"
+          : lang === "es"
+            ? "🎯 <b>¡Convierte tu grupo en un espacio de duelos y recompensas!</b>\n\n🤝 Añade <b>Golden Duel</b> a tu grupo para que sus miembros puedan jugar duelos amistosos o con apuesta directamente allí.\n\n💰 <b>Recompensas por alojar el grupo:</b> En los duelos con apuesta que cumplan los requisitos y terminen en tu grupo, la parte del anfitrión se calcula según la comisión y el porcentaje configurado, y se añade directamente al saldo de tu cartera del bot.\n\n⚡️ Es sencillo: añade el bot al grupo, concede los permisos necesarios y disfruta de la competición."
+            : "🎯 <b>Turn your group into a duel arena with rewards!</b>\n\n🤝 Add <b>Golden Duel</b> to your group so members can play friendly or wager duels right inside the group.\n\n💰 <b>Group host rewards:</b> For eligible wager duels completed in your group, the host share is calculated from the fee and configured reward rate, then credited directly to your bot wallet balance.\n\n⚡️ Setup is simple: add the bot, grant the required permissions, and let your group enjoy the competition!";
       return void (await ctx.reply(addGroupText, {
         parse_mode: "HTML",
         reply_markup: {
           inline_keyboard: [
             [
               {
-                text: text4(
-                  lang,
-                  "👥 افزودن ربات به گروه",
-                  "👥 Add bot to group",
-                ),
+                text:
+                  text4(lang, "👥 افزودن ربات به گروه", "👥 Add bot to group"),
                 url,
                 style: "success",
               },
@@ -1793,9 +1691,7 @@ async function runButton(ctx: any, btn: ButtonKey): Promise<void> {
       const cfg = await getSettings();
       const code = await getReferralCode(ctx.from!.id);
       const link = `https://t.me/${bot.botInfo.username}?start=ref_${code}`;
-
       const referralCurrency: Currency = ctx.lang === "fa" ? "IRT" : "TON";
-
       return void (await say(ctx, "referral.info", {
         link,
         count: await referralCount(ctx.from!.id),
@@ -1843,11 +1739,7 @@ async function handleState(
     if (text.trim() === "/cancel") {
       await clearState(id);
       return void (await ctx.reply(
-        text4(
-          ctx.lang,
-          "✅ عملیات رد فاکتور لغو شد؛ فاکتور همچنان در انتظار بررسی است.",
-          "✅ Rejection cancelled; the invoice remains pending.",
-        ),
+        text4(ctx.lang, "✅ عملیات رد فاکتور لغو شد؛ فاکتور همچنان در انتظار بررسی است.", "✅ Rejection cancelled; the invoice remains pending."),
       ));
     }
     if (
@@ -1893,11 +1785,7 @@ async function handleState(
     if (text.trim() === "/cancel") {
       await clearState(id);
       return void (await ctx.reply(
-        text4(
-          ctx.lang,
-          "✅ جستجوی فاکتور لغو شد.",
-          "✅ Invoice search cancelled.",
-        ),
+        text4(ctx.lang, "✅ جستجوی فاکتور لغو شد.", "✅ Invoice search cancelled."),
       ));
     }
     if (ctx.u?.role !== "admin" && ctx.u?.role !== "owner") {
@@ -1926,21 +1814,13 @@ async function handleState(
     if (text.trim() === "/cancel") {
       await clearState(id);
       return void (await ctx.reply(
-        text4(
-          ctx.lang,
-          "✅ تنظیم فاصلهٔ بکاپ لغو شد.",
-          "✅ Backup interval change cancelled.",
-        ),
+        text4(ctx.lang, "✅ تنظیم فاصلهٔ بکاپ لغو شد.", "✅ Backup interval change cancelled."),
       ));
     }
     if (!isOwnerUser(ctx)) {
       await clearState(id);
       return void (await ctx.reply(
-        text4(
-          ctx.lang,
-          "⛔ این تنظیم فقط برای مالک ربات است.",
-          "⛔ Only the bot owner can change backup settings.",
-        ),
+        text4(ctx.lang, "⛔ این تنظیم فقط برای مالک ربات است.", "⛔ Only the bot owner can change backup settings."),
       ));
     }
     const normalized = normalizeDigits(text.trim());
@@ -1952,11 +1832,7 @@ async function handleState(
       minutes > 1440
     ) {
       return void (await ctx.reply(
-        text4(
-          ctx.lang,
-          "❌ فاصله باید یک عدد صحیح بین ۱ تا ۱۴۴۰ دقیقه باشد. نمونه: <code>32</code> یا <code>120</code>. برای لغو /cancel را بفرست.",
-          "❌ Enter a whole number from 1 to 1440 minutes, e.g. <code>32</code> or <code>120</code>. Send /cancel to abort.",
-        ),
+        text4(ctx.lang, "❌ فاصله باید یک عدد صحیح بین ۱ تا ۱۴۴۰ دقیقه باشد. نمونه: <code>32</code> یا <code>120</code>. برای لغو /cancel را بفرست.", "❌ Enter a whole number from 1 to 1440 minutes, e.g. <code>32</code> or <code>120</code>. Send /cancel to abort."),
         { parse_mode: "HTML" },
       ));
     }
@@ -2195,11 +2071,7 @@ async function handleState(
         const invoice = await createTonDepositInvoice({ userId: id, amount });
         await clearState(id);
         const testnetNote = IS_TON_TESTNET
-          ? text4(
-              ctx.lang,
-              "\n\n🧪 <b>حالت تست (testnet)</b>: دکمه‌ی Tonkeeper غیرفعال است؛ از ولت testnet به آدرس بالا با مبلغ دقیق و کامنت بالا ارسال کن.",
-              "\n\n🧪 <b>Testnet mode</b>: the Tonkeeper button is disabled; send from a testnet wallet to the address above with the exact amount and comment.",
-            )
+          ? text4(ctx.lang, "\n\n🧪 <b>حالت تست (testnet)</b>: دکمه‌ی Tonkeeper غیرفعال است؛ از ولت testnet به آدرس بالا با مبلغ دقیق و کامنت بالا ارسال کن.", "\n\n🧪 <b>Testnet mode</b>: the Tonkeeper button is disabled; send from a testnet wallet to the address above with the exact amount and comment.")
           : "";
         const text =
           t(ctx.lang, "deposit.ton_invoice", {
@@ -2217,11 +2089,8 @@ async function handleState(
                 ? [
                     [
                       {
-                        text: text4(
-                          ctx.lang,
-                          "💎 پرداخت با Tonkeeper",
-                          "💎 Pay with Tonkeeper",
-                        ),
+                        text:
+                          text4(ctx.lang, "💎 پرداخت با Tonkeeper", "💎 Pay with Tonkeeper"),
                         url: invoice.paymentUrl,
                       },
                     ],
@@ -2229,11 +2098,8 @@ async function handleState(
                 : []),
               [
                 {
-                  text: text4(
-                    ctx.lang,
-                    "🔍 بررسی تراکنش",
-                    "🔍 Check transaction",
-                  ),
+                  text:
+                    text4(ctx.lang, "🔍 بررسی تراکنش", "🔍 Check transaction"),
                   callback_data: `toncheck:${invoice.invoiceNumber}`,
                 },
               ],

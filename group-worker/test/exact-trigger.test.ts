@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { exactTrigger } from '../src/core/util'
 
 test('accepts exact Persian and English game keywords', () => {
-  for (const word of ['fight', 'duel', 'challenge', 'competition', 'دوئل', 'فایت', 'رقابت', 'چالش', 'چلنج']) {
+  for (const word of ['fight', 'duel', 'challenge', 'challange', 'competition', 'دوئل', 'فایت', 'رقابت', 'چالش', 'چلنج']) {
     assert.equal(exactTrigger(word), 'fight', word)
   }
 })
@@ -24,6 +24,7 @@ test('does not treat a keyword embedded in ordinary chat as a command', () => {
 test('rejects slash commands with arguments or trailing text', () => {
   assert.equal(exactTrigger('/fight'), 'fight')
   assert.equal(exactTrigger('/challenge'), 'fight')
+  assert.equal(exactTrigger('/challange'), 'fight')
   assert.equal(exactTrigger('/help'), 'help')
   assert.equal(exactTrigger('/fight extra'), null)
   assert.equal(exactTrigger('/panel now'), null)

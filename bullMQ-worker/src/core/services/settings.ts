@@ -7,6 +7,9 @@ export interface Settings {
   version: number
   bets: Record<Currency, number[]>
   fees: Fees
+  /** Percent of group-game house fees credited to the group activator (0..100).
+   * This key must be present because this worker shares cfg:main:v2 with private-worker. */
+  groupRewardPercent: number
   /** Fixed withdrawal fee in the currency's stored units (IRT=toman, TON=nanoTON). */
   withdrawalFees: Record<Currency, number>
   limits: {
@@ -35,6 +38,8 @@ export const DEFAULTS: Settings = {
   version: 1,
   bets: { IRT: [10_000, 20_000, 30_000, 50_000], TON: [100_000_000, 200_000_000, 500_000_000, 1_000_000_000] },
   fees: { win: 1000, draw: 500, winTimeout: 2000, drawTimeout: 1000 }, // 10% / 5% / 20% / 10%
+  // Keep in sync with private-worker: both workers share the same Redis settings key.
+  groupRewardPercent: 20,
   withdrawalFees: { IRT: 0, TON: 0 },
   limits: {
     minDeposit: { IRT: 20_000, TON: 100_000_000 },
@@ -58,7 +63,7 @@ export const DEFAULTS: Settings = {
   bannedWords: [],
 }
 
-const KEY = 'cfg:main'
+const KEY = 'cfg:main:v2'
 const CHANNEL = 'cfg:invalidate'
 let l1: { v: Settings; exp: number } | null = null
 

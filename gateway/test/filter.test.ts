@@ -9,7 +9,7 @@ describe("gateway group trigger allow-list", () => {
   });
 
   test("routes supported English challenge words and commands", () => {
-    for (const word of ["duel", "/duel", "fight", "/fight", "challenge", "/challenge", "competition", "/competition"]) {
+    for (const word of ["duel", "/duel", "fight", "/fight", "challenge", "/challenge", "challange", "/challange", "competition", "/competition"]) {
       expect(isGroupTrigger(word)).toBe(true);
     }
   });

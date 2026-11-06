@@ -5,7 +5,7 @@ import { GroupConfig, GroupDuel, Settings } from '../models/index'
 import { setFlow, reserve, release } from './wallet'
 import { scheduleGroupInviteTimeout } from './timing'
 import { deleteEphemeralMessage, editEphemeralMessage, sendEphemeralMessage } from '../bot/ephemeral'
-import { groupModeNeedsStake, type GroupFlow, type GroupCurrency, type GroupMode, type MessageReference } from '../contracts/group'
+import { groupModeNeedsStake, groupInvitationDelivery, type GroupFlow, type GroupCurrency, type GroupMode, type MessageReference } from '../contracts/group'
 import { sendGroupDuelNotice, deleteDuelPublicNotices } from './game-message'
 import { logError } from '../logger'
 
@@ -76,6 +76,7 @@ export async function beginFlow(
   actor: { id: number; first_name?: string; last_name?: string; username?: string },
   target: { id: number; first_name?: string; last_name?: string; username?: string } | undefined,
   triggerMessageId?: number,
+  targetMessageId?: number,
 ) {
   const openChallenge = !target
   const groupSettings = await GroupConfig.findOne({ chatId }).select('language').lean() as any
@@ -129,7 +130,7 @@ export async function beginFlow(
     targetId: target?.id ?? 0, targetName: target ? [target.first_name, target.last_name].filter(Boolean).join(' ') || '' : '', targetUsername: target?.username ?? '',
     openChallenge,
     mode: modes.length === 1 ? modes[0] : null, currency: currencies.length === 1 ? currencies[0] : null,
-    step: 'mode', triggerMessageId,
+    step: 'mode', triggerMessageId, targetMessageId,
   }
 
   await setFlow(actor.id, flow)
@@ -191,7 +192,11 @@ export async function advanceFlow(uid: number, flow: GroupFlow, edit?: MessageRe
 export async function createInvite(uid: number, flow: GroupFlow, amount: number, formRef?: MessageReference) {
   const mode = flow.mode
   if (!mode) throw new Error('INCOMPLETE_FLOW')
-  const openChallenge = flow.openChallenge === true || Number(flow.targetId) <= 0
+  const delivery = groupInvitationDelivery(flow)
+  const openChallenge = delivery.publicAcceptButton
+  if (delivery.privateAcceptForm && (!Number.isSafeInteger(Number(flow.targetId)) || Number(flow.targetId) <= 0)) {
+    throw new Error('GROUP_TARGET_REQUIRED')
+  }
   const currency: GroupCurrency | null = mode === 'bet' ? flow.currency : null
   const stake = mode === 'bet' ? amount : 0
   const cfg = await GroupConfig.findOne({ chatId: flow.chatId }).lean() as any
@@ -251,10 +256,10 @@ export async function createInvite(uid: number, flow: GroupFlow, amount: number,
     `✅ <b>تم نشر التحدي العام في المجموعة.</b>\n${stakeLineAr}\nانتظر أول لاعب يقبل خلال ${timeoutSeconds} ثانية أو ألغِ الطلب.`,
     `✅ <b>Tu desafío público se ha publicado en el grupo.</b>\n${stakeLineEs}\nEspera hasta ${timeoutSeconds} segundos a que alguien lo acepte o cancela la solicitud.`,
   ) : tr(lang,
-    `✅ دعوت خصوصی برای ${targetMention} ارسال شد.\n${stakeLineFa}\nتا پاسخ حریف منتظر بمان یا دعوت را لغو کن.`,
-    `✅ A private invitation was sent to ${targetMention}.\n${stakeLineEn}\nWait for the response or cancel the invitation.`,
-    `✅ تم إرسال دعوة خاصة إلى ${targetMention}.\n${stakeLineAr}\nانتظر رد الخصم أو ألغِ الدعوة.`,
-    `✅ Se ha enviado una invitación privada a ${targetMention}.\n${stakeLineEs}\nEspera la respuesta o cancela la invitación.`,
+    `✅ دعوت در گروه اعلام شد و فرم قبول یا رد فقط برای ${targetMention} ارسال شد.\n${stakeLineFa}\nتا پاسخ حریف منتظر بمان یا دعوت را لغو کن.`,
+    `✅ The invitation was announced in the group, and the Accept/Reject form was sent only to ${targetMention}.\n${stakeLineEn}\nWait for the response or cancel the invitation.`,
+    `✅ تم الإعلان عن الدعوة في المجموعة، وأُرسل نموذج القبول أو الرفض إلى ${targetMention} فقط.\n${stakeLineAr}\nانتظر رد الخصم أو ألغِ الدعوة.`,
+    `✅ La invitación se anunció en el grupo y el formulario para aceptar o rechazar se envió solo a ${targetMention}.\n${stakeLineEs}\nEspera la respuesta o cancela la invitación.`,
   )
   const publicInviteText = openChallenge ? tr(lang,
     `⚔️ ${actorMention} یک دوئل ${modeLabelFa} ایجاد کرده است.${stakeLineFa}\nبرای شرکت، دکمهٔ «پذیرش دوئل» را بزنید. اولین پذیرنده، حریف این رقابت خواهد بود.`,
@@ -262,10 +267,10 @@ export async function createInvite(uid: number, flow: GroupFlow, amount: number,
     `⚔️ أنشأ ${actorMention} تحدياً ${modeLabelAr}.${stakeLineAr}\nاضغط «قبول التحدي» للمشاركة. أول لاعب مؤهل يقبل يصبح الخصم.`,
     `⚔️ ${actorMention} ha creado un duelo ${modeLabelEs}.${stakeLineEs}\nPulsa «Aceptar duelo» para participar. El primer jugador que lo acepte será el rival.`,
   ) : tr(lang,
-    `⚔️ ${actorMention} کاربر ${targetMention} را به یک دوئل ${modeLabelFa} دعوت کرد.${stakeLineFa}`,
-    `⚔️ ${actorMention} challenged ${targetMention} to a ${modeLabelEn} duel.${stakeLineEn}`,
-    `⚔️ دعا ${actorMention} اللاعب ${targetMention} إلى تحدٍّ ${modeLabelAr}.${stakeLineAr}`,
-    `⚔️ ${actorMention} ha desafiado a ${targetMention} a un duelo ${modeLabelEs}.${stakeLineEs}`,
+    `⚔️ ${actorMention}، ${targetMention} را به یک دوئل ${modeLabelFa} دعوت کرده است.${stakeLineFa}\nفرم قبول یا رد این دعوت فقط برای ${targetMention} نمایش داده شده است.`,
+    `⚔️ ${actorMention} invited ${targetMention} to a ${modeLabelEn} duel.${stakeLineEn}\nOnly ${targetMention} can see the Accept/Reject form.`,
+    `⚔️ دعا ${actorMention} اللاعب ${targetMention} إلى تحدٍّ ${modeLabelAr}.${stakeLineAr}\nيظهر نموذج القبول أو الرفض لـ ${targetMention} فقط.`,
+    `⚔️ ${actorMention} ha invitado a ${targetMention} a un duelo ${modeLabelEs}.${stakeLineEs}\nSolo ${targetMention} puede ver el formulario para aceptar o rechazar.`,
   )
 
   let opponentCard: any
@@ -287,19 +292,32 @@ export async function createInvite(uid: number, flow: GroupFlow, amount: number,
     } })
     if (!savedWait.modifiedCount) throw new Error('INITIATOR_WAIT_CARD_STATE_CHANGED')
 
-    const openKeyboard = openChallenge
-      ? colorize(new InlineKeyboard().text(tr(lang, '✅ پذیرش دوئل', '✅ Accept duel'), `gw:openaccept:${id}`))
-      : undefined
-    const publicInviteMessageId = await sendGroupDuelNotice(id, Number(flow.chatId), publicInviteText, undefined,
-      openKeyboard ? { inline_keyboard: openKeyboard.inline_keyboard } : undefined)
+    // Every invitation gets a public announcement. Only a challenge without a
+    // reply target has a public accept button; a targeted challenge exposes its
+    // Accept/Reject controls exclusively to the replied-to user via ephemeral UI.
+    let publicKeyboard: { inline_keyboard: any[][] } | undefined
+    if (delivery.publicAcceptButton) {
+      const openKeyboard = colorize(new InlineKeyboard()
+        .text(tr(lang, '✅ پذیرش دوئل', '✅ Accept duel'), `gw:openaccept:${id}`))
+      publicKeyboard = { inline_keyboard: openKeyboard.inline_keyboard }
+    }
+    if (delivery.publicAnnouncement) {
+      await sendGroupDuelNotice(
+        id,
+        Number(flow.chatId),
+        publicInviteText,
+        delivery.privateAcceptForm && flow.targetMessageId ? Number(flow.targetMessageId) : undefined,
+        publicKeyboard,
+      )
+    }
 
-    if (!openChallenge) {
+    if (delivery.privateAcceptForm) {
       const inviteKeyboard = colorize(new InlineKeyboard()
         .text(tr(lang, '✅ قبول', '✅ Accept'), `gw:accept:${id}`)
         .text(tr(lang, '❌ رد', '❌ Reject'), `gw:reject:${id}`))
       opponentCard = await sendEphemeralMessage(Number(flow.chatId), flow.targetId, inviteText, {
         parse_mode: 'HTML', reply_markup: { inline_keyboard: inviteKeyboard.inline_keyboard },
-      }, { replyMessageId: publicInviteMessageId })
+      }, flow.targetMessageId ? { replyMessageId: Number(flow.targetMessageId) } : {})
       const savedInvite = await GroupDuel.updateOne({ _id: id, status: 'pending' }, { $set: {
         opponentInviteEphemeralId: Number(opponentCard?.ephemeral_message_id),
       } })

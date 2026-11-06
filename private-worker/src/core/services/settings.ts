@@ -61,7 +61,7 @@ export const DEFAULTS: Settings = {
   bannedWords: [],
 }
 
-const KEY = 'cfg:main'
+const KEY = 'cfg:main:v2'
 const CHANNEL = 'cfg:invalidate'
 let l1: { v: Settings; exp: number } | null = null
 
@@ -95,16 +95,39 @@ export async function getSettings(): Promise<Settings> {
 }
 
 export async function updateSettings(path: string, value: unknown): Promise<void> {
-  await getSettings() // make sure the document exists
-  await SettingsModel.updateOne({ _id: 'main' }, { $set: { [path]: value }, $inc: { version: 1 } })
+  // Do not use getSettings() as an existence check: it may return a warm Redis/L1
+  // value while the MongoDB document is missing. In that case updateOne() without
+  // upsert silently matches nothing, and the next cache miss restores DEFAULTS.
+  await SettingsModel.updateOne(
+    { _id: 'main' },
+    { $setOnInsert: DEFAULTS },
+    { upsert: true },
+  )
+
+  // Return the document produced by the write so we can verify the persisted value
+  // before telling the owner that the setting was changed successfully.
+  const updated = await SettingsModel.findOneAndUpdate(
+    { _id: 'main' },
+    { $set: { [path]: value }, $inc: { version: 1 } },
+    { new: true },
+  ).lean() as any
+
+  if (!updated) throw new Error(`SETTINGS_UPDATE_FAILED:${path}`)
+  const persistedValue = path.split('.').reduce((current: any, key) => current?.[key], updated)
+  if (JSON.stringify(persistedValue) !== JSON.stringify(value)) {
+    throw new Error(`SETTINGS_WRITE_VERIFY_FAILED:${path}`)
+  }
+
+  // Invalidate local and shared caches only after MongoDB confirms the write.
   l1 = null
   await redis.del(KEY)
   await redis.publish(CHANNEL, '1')
 }
 
 export async function startSettingsSubscriber(): Promise<void> {
-  await redisSub.subscribe(CHANNEL)
+  // Register before SUBSCRIBE resolves so the first invalidation cannot be missed.
   redisSub.on('message', (channel) => {
     if (channel === CHANNEL) l1 = null
   })
+  await redisSub.subscribe(CHANNEL)
 }

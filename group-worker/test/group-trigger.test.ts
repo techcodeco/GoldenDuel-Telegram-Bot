@@ -9,7 +9,7 @@ test('group worker recognizes the same Persian challenge words as gateway', () =
 })
 
 test('group worker recognizes supported English challenge words and commands', () => {
-  for (const word of ['duel', '/duel', 'fight', '/fight', 'challenge', '/challenge', 'competition', '/competition']) {
+  for (const word of ['duel', '/duel', 'fight', '/fight', 'challenge', '/challenge', 'challange', '/challange', 'competition', '/competition']) {
     assert.equal(exactTrigger(word), 'fight', word)
   }
 })
