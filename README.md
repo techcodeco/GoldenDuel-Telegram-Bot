@@ -1,6 +1,6 @@
 <div dir="rtl">
 
-# 🎮 RPS Worker
+# 🎮 GoldenDuel Game Bot
 
 **سامانهٔ ربات تلگرام سنگ، کاغذ، قیچی با معماری چندسرویسی**
 
@@ -63,8 +63,8 @@ project/
 ### ۱. دریافت مخزن
 
 ```bash
-git clone <REPOSITORY_URL>
-cd <PROJECT_DIRECTORY>
+git clone https://github.com/techcodeco/GoldenDuel-Telegram-Bot
+cd GoldenDuel-Telegram-Bot
 ```
 
 ### ۲. تنظیم محیط هر سرویس
